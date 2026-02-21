@@ -13,6 +13,8 @@ import torch
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+from utils.reproducibility import set_global_seed
+
 
 def main():
     parser = argparse.ArgumentParser(description="AI Combat Evaluation")
@@ -21,12 +23,38 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--fog-level", type=str, default="moderate",
                         choices=["clear", "light", "moderate", "heavy", "maximum"])
+    parser.add_argument("--benchmark", type=str, default=None, choices=["historical"],
+                        help="벤치마크 모드 (historical)")
+    parser.add_argument("--benchmark-runs", type=int, default=10,
+                        help="벤치마크 시나리오별 반복 실행 횟수")
+    parser.add_argument("--max-steps", type=int, default=50,
+                        help="Monte Carlo 단일 시나리오 최대 스텝")
+    parser.add_argument("--no-progress", action="store_true",
+                        help="진행률 바 비활성화")
+    parser.add_argument("--fast", action="store_true",
+                        help="빠른 스모크 평가 프리셋 (monte-carlo=50, max-steps=30)")
     args = parser.parse_args()
+
+    set_global_seed(args.seed)
+
+    if args.fast and args.benchmark is None:
+        args.monte_carlo = min(args.monte_carlo, 50)
+        args.max_steps = min(args.max_steps, 30)
+        print(f"⚡ Fast preset enabled: monte_carlo={args.monte_carlo}, max_steps={args.max_steps}")
 
     from simulator.lanchester_engine import LanchesterEngine
     from simulator.fog_of_war import FogOfWarFilter, FogLevel
     from rl_agent.blue_agent import BlueAgent
     from evaluation.monte_carlo import MonteCarloEvaluator
+
+    if args.benchmark == "historical":
+        from evaluation.historical_benchmark import HistoricalBenchmark
+
+        print(f"\n📚 Historical 벤치마크 시작 (runs={args.benchmark_runs})")
+        bench = HistoricalBenchmark(seed=args.seed)
+        report = bench.run_all(n_runs=args.benchmark_runs)
+        print(report.summary())
+        return
 
     engine = LanchesterEngine(seed=args.seed)
     blue_agent = BlueAgent()
@@ -44,9 +72,16 @@ def main():
     }
     fog_filter = FogOfWarFilter(fog_level_map[args.fog_level], seed=args.seed)
 
-    print(f"\n📊 Monte Carlo 평가 시작 ({args.monte_carlo} runs, Fog={args.fog_level.upper()})")
+    print(f"\n📊 Monte Carlo 평가 시작 ({args.monte_carlo} runs, Fog={args.fog_level.upper()}, MaxSteps={args.max_steps})")
     evaluator = MonteCarloEvaluator(n_runs=args.monte_carlo, seed=args.seed)
-    report = evaluator.evaluate(blue_agent, engine, fog_filter=fog_filter, verbose=True)
+    report = evaluator.evaluate(
+        blue_agent,
+        engine,
+        fog_filter=fog_filter,
+        verbose=True,
+        show_progress=not args.no_progress,
+        max_steps=args.max_steps,
+    )
     evaluator.print_report(report)
 
     # 목표 지표 달성 여부
