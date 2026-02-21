@@ -21,12 +21,25 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--fog-level", type=str, default="moderate",
                         choices=["clear", "light", "moderate", "heavy", "maximum"])
+    parser.add_argument("--benchmark", type=str, default=None, choices=["historical"],
+                        help="벤치마크 모드 (historical)")
+    parser.add_argument("--benchmark-runs", type=int, default=10,
+                        help="벤치마크 시나리오별 반복 실행 횟수")
     args = parser.parse_args()
 
     from simulator.lanchester_engine import LanchesterEngine
     from simulator.fog_of_war import FogOfWarFilter, FogLevel
     from rl_agent.blue_agent import BlueAgent
     from evaluation.monte_carlo import MonteCarloEvaluator
+
+    if args.benchmark == "historical":
+        from evaluation.historical_benchmark import HistoricalBenchmark
+
+        print(f"\n📚 Historical 벤치마크 시작 (runs={args.benchmark_runs})")
+        bench = HistoricalBenchmark(seed=args.seed)
+        report = bench.run_all(n_runs=args.benchmark_runs)
+        print(report.summary())
+        return
 
     engine = LanchesterEngine(seed=args.seed)
     blue_agent = BlueAgent()

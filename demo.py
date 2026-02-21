@@ -115,6 +115,8 @@ def run_demo():
 
     blue_agent = BlueAgent()
     red_agent  = RedAgent()
+    print("\nℹ️  Demo uses randomly initialized agents unless you load trained checkpoints.")
+    print("   Low win rate in this demo run is expected and does not indicate a runtime error.")
 
     gnn_ext = gnn.compute_ppo_state_extension(x, adj)
     state = build_state_vector(obs_kg, gnn_extension=gnn_ext, uncertainty_map=uncertainty_map)
