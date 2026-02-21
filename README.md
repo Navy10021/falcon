@@ -46,21 +46,21 @@ It combines four tightly integrated modules — Bayesian GNN, Adversarial Self-P
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│                      FALCON PIPELINE                          │
-│                                                                │
-│  🗂️ Ontology  ──▶  ⚔️  Simulator  ──▶  🕸️  Bayesian GNN      │
-│  Combat knowledge     Lanchester physics   Uncertainty-aware   │
-│  (KG: 14 units,       Fog of War          prediction dist.     │
-│   120 edges,          curriculum          N(μ, σ²)            │
-│   9 ADP principles)                            │               │
-│                                                ▼               │
-│  📊 Evaluation  ◀──  🎯 HITL       ◀──  🤖  RL Agents         │
-│  Monte Carlo          Pareto options       Blue PPO            │
-│  5,000 runs           Natural language     ⬆️  ⬇️              │
-│  Benchmark            Commander lock-in    Red PPO (Adversarial)│
-│       │                    │                                   │
-│       └──────────── 💡 Explainability ───────────────────────  │
-│                    Auto-AAR + Attention viz + Counterfactuals  │
+                      FALCON PIPELINE                          
+                                                                
+  🗂️ Ontology  ──▶  ⚔️  Simulator  ──▶  🕸️  Bayesian GNN      
+  Combat knowledge     Lanchester physics   Uncertainty-aware   
+  (KG: 14 units,       Fog of War          prediction dist.     
+   120 edges,          curriculum          N(μ, σ²)            
+   9 ADP principles)                            │               
+                                                ▼               
+  📊 Evaluation  ◀──  🎯 HITL       ◀──  🤖  RL Agents         
+  Monte Carlo          Pareto options       Blue PPO            
+  5,000 runs           Natural language     ⬆️  ⬇️              
+  Benchmark            Commander lock-in    Red PPO (Adversarial)
+       │                    │                                   
+       └──────────── 💡 Explainability ───────────────────────  
+                    Auto-AAR + Attention viz + Counterfactuals  
 └────────────────────────────────────────────────────────────────┘
 ```
 
