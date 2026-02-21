@@ -183,6 +183,22 @@ def run_demo(args):
     else:
         print("\nℹ️  Demo mode: checkpoint policy")
 
+    policy_source = "random_init"
+    if args.blue_checkpoint and os.path.exists(args.blue_checkpoint):
+        blue_agent.load(args.blue_checkpoint)
+        policy_source = "checkpoint"
+        print(f"\n✅ Blue checkpoint loaded: {args.blue_checkpoint}")
+    if args.red_checkpoint and os.path.exists(args.red_checkpoint):
+        red_agent.load(args.red_checkpoint)
+        policy_source = "checkpoint"
+        print(f"✅ Red checkpoint loaded: {args.red_checkpoint}")
+
+    if policy_source == "random_init":
+        print("\nℹ️  Demo mode: baseline (random_init policy)")
+        print("   Low win rate in this demo run is expected and does not indicate a runtime error.")
+    else:
+        print("\nℹ️  Demo mode: checkpoint policy")
+
     gnn_ext = gnn.compute_ppo_state_extension(x, adj)
     state = build_state_vector(obs_kg, gnn_extension=gnn_ext, uncertainty_map=uncertainty_map)
 

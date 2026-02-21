@@ -61,6 +61,7 @@ Ontology/Scenario -> Simulator/Fog -> Bayesian GNN -> RL Agents (Blue/Red)
 - `explainability/`: attention-based reports, AAR utilities
 - `evaluation/`: Monte Carlo and historical benchmark evaluation
 - `visualization/`: dashboard and charting components
+- `docs/`: project documentation, reports, and structure guides
 
 ---
 
