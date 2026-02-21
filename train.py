@@ -211,7 +211,16 @@ def train_phase3(args):
         if generator.last_generation_all_violated:
             phase3_stats["all_violated_episodes"] += 1
         ranked_options = learner.get_personalized_ranking(options)
-        selected = ranked_options[0]
+
+        ai_recommended = ranked_options[0]
+        # 모의 HITL 채택: 기본 70%는 AI 추천 수용, 30%는 차선책 선택
+        accept_prob = 0.70
+        if len(ranked_options) > 1 and np.random.rand() > accept_prob:
+            selected = ranked_options[1]
+            feedback_rating = 3
+        else:
+            selected = ai_recommended
+            feedback_rating = 5
 
         learner.record_selection(
             SelectionRecord(
@@ -222,7 +231,8 @@ def train_phase3(args):
                 force_size=selected.force_size,
                 win_probability=selected.win_probability,
                 expected_casualties=selected.expected_casualties,
-                feedback_rating=4,
+                feedback_rating=feedback_rating,
+                ai_recommended_option_id=ai_recommended.option_id,
             )
         )
 
@@ -230,6 +240,7 @@ def train_phase3(args):
             print(
                 f"  EP {ep:5d}/{args.episodes} | "
                 f"Adoption={learner.adoption_rate:.1%} | "
+                f"AI={ai_recommended.label:8s} | "
                 f"Selected={selected.label:8s} | "
                 f"WinP={selected.win_probability:.1%}"
             )

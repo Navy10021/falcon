@@ -28,6 +28,7 @@ class SelectionRecord:
     win_probability: float
     expected_casualties: int
     feedback_rating: Optional[int] = None  # 1~5
+    ai_recommended_option_id: Optional[str] = None
 
 
 class CommanderPreferenceLearner:
@@ -84,8 +85,11 @@ class CommanderPreferenceLearner:
 
     def _update_adoption_rate(self, record: SelectionRecord):
         """AI 추천 채택률 업데이트 (HITL 신뢰도 지표)"""
-        # 균형 전략(Option 2)이 AI 추천으로 가정
-        adopted = record.selected_option_id in ["option_2", "option_3"]
+        if record.ai_recommended_option_id is not None:
+            adopted = (record.selected_option_id == record.ai_recommended_option_id)
+        else:
+            # 하위 호환: 과거 규칙
+            adopted = record.selected_option_id in ["option_2", "option_3"]
         n = len(self.records)
         self.adoption_rate = (self.adoption_rate * (n - 1) + float(adopted)) / n
 
