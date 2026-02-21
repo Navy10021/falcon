@@ -27,6 +27,9 @@ check("evaluate.py accepts --benchmark historical", rc == 0, f"rc={rc}")
 rc, out = run_cmd("python evaluate.py --benchmark invalid")
 check("evaluate.py rejects invalid benchmark choices", rc != 0, f"rc={rc}")
 
+rc, out = run_cmd("python evaluate.py --fast --monte-carlo 5 --no-progress")
+check("evaluate.py accepts fast/no-progress options", rc == 0, f"rc={rc}")
+
 rc, out = run_cmd("python train.py --phase 3 --episodes 1 --hitl")
 check("train.py accepts phase 3 with --hitl", rc == 0, f"rc={rc}")
 

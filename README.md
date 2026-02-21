@@ -105,7 +105,10 @@ python train.py --phase 3 --episodes 2000 --hitl
 
 ```bash
 # Monte Carlo robustness
-python evaluate.py --monte-carlo 5000 --fog-level moderate
+python evaluate.py --monte-carlo 5000 --fog-level moderate --max-steps 50
+
+# Fast smoke evaluation (quick local check)
+python evaluate.py --fast --no-progress
 
 # Historical benchmark scenarios
 python evaluate.py --benchmark historical --benchmark-runs 10
