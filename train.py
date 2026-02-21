@@ -173,10 +173,70 @@ def train_phase2(args):
             print(f"   {k}: {v}")
 
 
+def train_phase3(args):
+    """Phase 3: HITL 통합 루프"""
+    print("🟣 Phase 3: HITL 통합 훈련 시작")
+
+    from ontology.combat_schema import ScenarioFactory
+    from hitl.pareto_generator import ParetoStrategyGenerator, CommanderConstraints
+    from hitl.preference_learner import CommanderPreferenceLearner, SelectionRecord
+
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
+
+    generator = ParetoStrategyGenerator(n_candidates=5)
+    learner = CommanderPreferenceLearner(commander_id="phase3_commander")
+
+    for ep in range(args.episodes):
+        kg = ScenarioFactory.create_standard_scenario(
+            n_blue=np.random.randint(5, 12),
+            n_red=np.random.randint(4, 9),
+            seed=args.seed + ep,
+        )
+
+        constraints = CommanderConstraints(
+            min_win_probability=0.55,
+            max_time_steps=50,
+            prefer_flanking=(ep % 3 == 0),
+            prefer_artillery=(ep % 4 == 0),
+            avoid_urban=(ep % 5 == 0),
+        )
+
+        options = generator.generate(kg, constraints=constraints)
+        ranked_options = learner.get_personalized_ranking(options)
+        selected = ranked_options[0]
+
+        learner.record_selection(
+            SelectionRecord(
+                scenario_id=ep,
+                options_presented=[o.option_id for o in ranked_options],
+                selected_option_id=selected.option_id,
+                selected_type=selected.strategy_type.value,
+                force_size=selected.force_size,
+                win_probability=selected.win_probability,
+                expected_casualties=selected.expected_casualties,
+                feedback_rating=4,
+            )
+        )
+
+        if ep % args.log_interval == 0 and ep > 0:
+            print(
+                f"  EP {ep:5d}/{args.episodes} | "
+                f"Adoption={learner.adoption_rate:.1%} | "
+                f"Selected={selected.label:8s} | "
+                f"WinP={selected.win_probability:.1%}"
+            )
+
+    pref_path = os.path.join(args.checkpoint_dir, "hitl_phase3_preferences.json")
+    learner.save(pref_path)
+    print("\n✅ Phase 3 HITL 통합 완료!")
+    print(f"   AI 추천 채택률: {learner.adoption_rate:.1%}")
+    print(f"   선호도 저장: {pref_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="AI Combat Optimization System Training")
-    parser.add_argument("--phase", type=int, default=1, choices=[1, 2],
-                        help="학습 Phase (1: GNN+PPO, 2: Self-Play)")
+    parser.add_argument("--phase", type=int, default=1, choices=[1, 2, 3],
+                        help="학습 Phase (1: GNN+PPO, 2: Self-Play, 3: HITL)")
     parser.add_argument("--episodes", type=int, default=500, help="에피소드 수")
     parser.add_argument("--lr", type=float, default=3e-4, help="학습률")
     parser.add_argument("--seed", type=int, default=42, help="랜덤 시드")
@@ -185,6 +245,7 @@ def main():
     parser.add_argument("--log-interval", type=int, default=50, help="로깅 간격")
     parser.add_argument("--save-interval", type=int, default=200, help="저장 간격")
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="체크포인트 저장 경로")
+    parser.add_argument("--hitl", action="store_true", help="Phase 3 HITL 통합 루프 활성화")
 
     args = parser.parse_args()
 
@@ -199,6 +260,10 @@ def main():
         train_phase1(args)
     elif args.phase == 2:
         train_phase2(args)
+    elif args.phase == 3:
+        if not args.hitl:
+            print("⚠️  Phase 3는 --hitl 옵션과 함께 실행하는 것을 권장합니다.")
+        train_phase3(args)
 
 
 if __name__ == "__main__":
