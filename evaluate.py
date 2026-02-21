@@ -13,6 +13,8 @@ import torch
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+from utils.reproducibility import set_global_seed
+
 
 def main():
     parser = argparse.ArgumentParser(description="AI Combat Evaluation")
@@ -26,6 +28,8 @@ def main():
     parser.add_argument("--benchmark-runs", type=int, default=10,
                         help="벤치마크 시나리오별 반복 실행 횟수")
     args = parser.parse_args()
+
+    set_global_seed(args.seed)
 
     from simulator.lanchester_engine import LanchesterEngine
     from simulator.fog_of_war import FogOfWarFilter, FogLevel

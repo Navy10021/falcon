@@ -6,12 +6,15 @@ Phase 1 / Phase 2 / Phase 3 선택적 실행
 """
 
 import argparse
+import json
 import os
 import sys
 import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+from utils.reproducibility import set_global_seed
 
 
 def train_phase1(args):
@@ -185,6 +188,7 @@ def train_phase3(args):
 
     generator = ParetoStrategyGenerator(n_candidates=5)
     learner = CommanderPreferenceLearner(commander_id="phase3_commander")
+    phase3_stats = {"episodes": args.episodes, "all_violated_episodes": 0}
 
     for ep in range(args.episodes):
         kg = ScenarioFactory.create_standard_scenario(
@@ -202,6 +206,8 @@ def train_phase3(args):
         )
 
         options = generator.generate(kg, constraints=constraints)
+        if generator.last_generation_all_violated:
+            phase3_stats["all_violated_episodes"] += 1
         ranked_options = learner.get_personalized_ranking(options)
         selected = ranked_options[0]
 
@@ -227,16 +233,38 @@ def train_phase3(args):
             )
 
     pref_path = os.path.join(args.checkpoint_dir, "hitl_phase3_preferences.json")
+    metrics_path = os.path.join(args.checkpoint_dir, "hitl_phase3_metrics.json")
+    run_cfg_path = os.path.join(args.checkpoint_dir, "hitl_phase3_run_config.json")
+
     learner.save(pref_path)
+
+    phase3_stats["adoption_rate"] = learner.adoption_rate
+    phase3_stats["all_violated_ratio"] = (
+        phase3_stats["all_violated_episodes"] / max(args.episodes, 1)
+    )
+    with open(metrics_path, "w") as f:
+        json.dump(phase3_stats, f, indent=2)
+
+    with open(run_cfg_path, "w") as f:
+        json.dump({
+            "phase": args.phase,
+            "episodes": args.episodes,
+            "seed": args.seed,
+            "hitl": args.hitl,
+            "log_interval": args.log_interval,
+            "checkpoint_dir": args.checkpoint_dir
+        }, f, indent=2)
+
     print("\n✅ Phase 3 HITL 통합 완료!")
     print(f"   AI 추천 채택률: {learner.adoption_rate:.1%}")
     print(f"   선호도 저장: {pref_path}")
+    print(f"   메트릭 저장: {metrics_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="AI Combat Optimization System Training")
     parser.add_argument("--phase", type=int, default=1, choices=[1, 2, 3],
-                        help="학습 Phase (1: GNN+PPO, 2: Self-Play, 3: HITL)")
+                        help="학습 Phase (1: GNN+PPO, 2: Self-Play, 3: HITL preference learning loop)")
     parser.add_argument("--episodes", type=int, default=500, help="에피소드 수")
     parser.add_argument("--lr", type=float, default=3e-4, help="학습률")
     parser.add_argument("--seed", type=int, default=42, help="랜덤 시드")
@@ -253,8 +281,7 @@ def main():
     print(f"   Phase {args.phase} | Episodes: {args.episodes} | Seed: {args.seed}")
     print("─" * 50)
 
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    set_global_seed(args.seed)
 
     if args.phase == 1:
         train_phase1(args)

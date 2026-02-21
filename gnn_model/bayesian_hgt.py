@@ -182,7 +182,7 @@ class BayesianHGT(nn.Module):
         h_proj = self.pool_proj(h_pool)  # [1, head_dim]
 
         return {
-            "casualty_mean":   self.casualty_head_mean(h_proj).squeeze(),
+            "casualty_mean":   F.softplus(self.casualty_head_mean(h_proj)).squeeze(),
             "casualty_logvar": self.casualty_head_logvar(h_proj).squeeze(),
             "risk_mean":       self.risk_head_mean(h_proj).squeeze(),
             "risk_logvar":     self.risk_head_logvar(h_proj).squeeze(),
@@ -225,7 +225,7 @@ class BayesianHGT(nn.Module):
 
         return {
             # 예측값
-            "casualty_mean":       cas_means_t.mean(dim=0),
+            "casualty_mean":       torch.clamp(cas_means_t.mean(dim=0), min=0.0),
             "casualty_std":        cas_means_t.std(dim=0),
             "risk_mean":           risk_means_t.mean(dim=0),
             "risk_std":            risk_means_t.std(dim=0),
@@ -235,8 +235,8 @@ class BayesianHGT(nn.Module):
             "total_uncertainty":     ((epistemic_cas + aleatoric_cas) +
                                       (epistemic_risk + aleatoric_risk)) / 2,
             # 95% 신뢰구간
-            "casualty_ci_low":  cas_means_t.mean(dim=0) - 1.96 * cas_means_t.std(dim=0),
-            "casualty_ci_high": cas_means_t.mean(dim=0) + 1.96 * cas_means_t.std(dim=0),
+            "casualty_ci_low":  torch.clamp(cas_means_t.mean(dim=0) - 1.96 * cas_means_t.std(dim=0), min=0.0),
+            "casualty_ci_high": torch.clamp(cas_means_t.mean(dim=0) + 1.96 * cas_means_t.std(dim=0), min=0.0),
         }
 
     def get_attention_weights(self, layer_idx: int = -1) -> Optional[torch.Tensor]:

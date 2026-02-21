@@ -5,6 +5,7 @@ AI Combat Optimization System — 전체 파이프라인 데모
 Phase 1, 2, 3 통합 시연
 """
 
+import argparse
 import os
 import sys
 import numpy as np
@@ -22,7 +23,7 @@ def separator(title: str = "", char: str = "═", width: int = 65):
         print(char * width)
 
 
-def run_demo():
+def run_demo(args):
     print("\n")
     separator("🧠 AI Combat Optimization System v2.0 — DEMO")
     print("\n  Ontology-Driven GNN + RL for Force Minimization")
@@ -38,7 +39,7 @@ def run_demo():
     from ontology.combat_schema import ScenarioFactory, ForceAlignment, UnitStatus
     from ontology.temporal_extension import TemporalStateTracker
 
-    kg = ScenarioFactory.create_standard_scenario(n_blue=8, n_red=6, seed=42)
+    kg = ScenarioFactory.create_standard_scenario(n_blue=8, n_red=6, seed=args.seed)
     stats = kg.get_stats()
 
     print(f"\n✅ Knowledge Graph 생성 완료:")
@@ -61,7 +62,7 @@ def run_demo():
 
     print("\n📊 Fog Level별 관측 비교:")
     for level in [FogLevel.CLEAR, FogLevel.MODERATE, FogLevel.MAXIMUM]:
-        fog = FogOfWarFilter(level, seed=42)
+        fog = FogOfWarFilter(level, seed=args.seed)
         obs_kg, unc_map = fog.observe(kg, ForceAlignment.BLUE)
         obs_stats = obs_kg.get_stats()
         avg_unc = np.mean(list(unc_map.values())) if unc_map else 0.0
@@ -77,7 +78,7 @@ def run_demo():
     from gnn_model.bayesian_hgt import BayesianHGT, prepare_graph_tensors
     from gnn_model.uncertainty_utils import risk_action_mapping
 
-    fog_filter = FogOfWarFilter(FogLevel.MODERATE, seed=42)
+    fog_filter = FogOfWarFilter(FogLevel.MODERATE, seed=args.seed)
     obs_kg, uncertainty_map = fog_filter.observe(kg, ForceAlignment.BLUE)
     x, adj = prepare_graph_tensors(obs_kg)
 
@@ -118,6 +119,22 @@ def run_demo():
     print("\nℹ️  Demo uses randomly initialized agents unless you load trained checkpoints.")
     print("   Low win rate in this demo run is expected and does not indicate a runtime error.")
 
+    policy_source = "random_init"
+    if args.blue_checkpoint and os.path.exists(args.blue_checkpoint):
+        blue_agent.load(args.blue_checkpoint)
+        policy_source = "checkpoint"
+        print(f"\n✅ Blue checkpoint loaded: {args.blue_checkpoint}")
+    if args.red_checkpoint and os.path.exists(args.red_checkpoint):
+        red_agent.load(args.red_checkpoint)
+        policy_source = "checkpoint"
+        print(f"✅ Red checkpoint loaded: {args.red_checkpoint}")
+
+    if policy_source == "random_init":
+        print("\nℹ️  Demo mode: baseline (random_init policy)")
+        print("   Low win rate in this demo run is expected and does not indicate a runtime error.")
+    else:
+        print("\nℹ️  Demo mode: checkpoint policy")
+
     gnn_ext = gnn.compute_ppo_state_extension(x, adj)
     state = build_state_vector(obs_kg, gnn_extension=gnn_ext, uncertainty_map=uncertainty_map)
 
@@ -142,8 +159,8 @@ def run_demo():
 
     from simulator.lanchester_engine import LanchesterEngine
 
-    engine = LanchesterEngine(seed=42)
-    kg_sim = ScenarioFactory.create_standard_scenario(n_blue=8, n_red=6, seed=42)
+    engine = LanchesterEngine(seed=args.seed)
+    kg_sim = ScenarioFactory.create_standard_scenario(n_blue=8, n_red=6, seed=args.seed)
     steps, result = engine.run_episode(kg_sim, max_steps=20)
 
     print(f"\n⚔️ 에피소드 결과: {result.upper()}")
@@ -235,7 +252,7 @@ def run_demo():
 
     from evaluation.monte_carlo import MonteCarloEvaluator
 
-    evaluator = MonteCarloEvaluator(n_runs=50, seed=42)
+    evaluator = MonteCarloEvaluator(n_runs=50, seed=args.seed)
     mc_report = evaluator.evaluate(blue_agent, engine, verbose=True)
     evaluator.print_report(mc_report)
 
@@ -252,6 +269,7 @@ def run_demo():
      전략 강건성:    {mc_report.strategy_robustness:.4f}
      불확실성(총):   {ep_unc + al_unc:.4f}
      Pareto 후보:   {len(options)}개 생성 완료
+     정책 출처:      {policy_source}
 
   🔗 GitHub 배포:
      README.md → requirements.txt → 각 모듈 → train.py → evaluate.py → demo.py
@@ -262,4 +280,15 @@ def run_demo():
 
 
 if __name__ == "__main__":
-    run_demo()
+    parser = argparse.ArgumentParser(description="FALCON end-to-end demo")
+    parser.add_argument("--blue-checkpoint", type=str, default=None,
+                        help="Optional Blue agent checkpoint path")
+    parser.add_argument("--red-checkpoint", type=str, default=None,
+                        help="Optional Red agent checkpoint path")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    args = parser.parse_args()
+
+    from utils.reproducibility import set_global_seed
+    set_global_seed(args.seed)
+
+    run_demo(args)
