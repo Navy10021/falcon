@@ -116,6 +116,8 @@ def run_demo(args):
 
     blue_agent = BlueAgent()
     red_agent  = RedAgent()
+    print("\nℹ️  Demo uses randomly initialized agents unless you load trained checkpoints.")
+    print("   Low win rate in this demo run is expected and does not indicate a runtime error.")
 
     policy_source = "random_init"
     if args.blue_checkpoint and os.path.exists(args.blue_checkpoint):
