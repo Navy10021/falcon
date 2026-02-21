@@ -1,0 +1,94 @@
+{
+  "generated_at": "2026-02-21 13:52:26",
+  "config": {
+    "n_scenarios": 100,
+    "n_blue_range": [
+      4,
+      12
+    ],
+    "n_red_range": [
+      3,
+      10
+    ],
+    "episode_steps": 20,
+    "n_irl_demos": 20,
+    "seed": 42,
+    "output_dir": "data",
+    "visualize": true
+  },
+  "scenario_stats": {
+    "total": 100,
+    "n_templates": 8,
+    "avg_nodes": 38.4,
+    "avg_edges": 43.9,
+    "avg_power_ratio": 1.184,
+    "power_ratio_std": 0.525,
+    "avg_blue_cp": 3.216,
+    "avg_red_cp": 3.028,
+    "unit_type_distribution": {
+      "blue_infantry": 261,
+      "blue_armor": 110,
+      "blue_artillery": 103,
+      "blue_engineer": 83,
+      "blue_signal": 69,
+      "blue_logistics": 56,
+      "red_infantry": 316,
+      "red_armor": 128,
+      "red_artillery": 116,
+      "red_electronic_warfare": 94
+    }
+  },
+  "episode_stats": {
+    "total": 100,
+    "blue_win": 52,
+    "red_win": 37,
+    "draw": 11,
+    "blue_win_rate": 0.52,
+    "avg_steps": 19.1,
+    "avg_force_reduction": 0.493,
+    "avg_blue_casualties": 446.5,
+    "template_win_rates": {
+      "assault": 0.85,
+      "defense": 0.0,
+      "flanking": 0.54,
+      "encirclement": 0.92,
+      "delay": 0.0,
+      "coastal_landing": 0.58,
+      "urban_combat": 0.75,
+      "mountain_ops": 0.5
+    }
+  },
+  "irl_stats": {
+    "n_demos": 100,
+    "n_tactics": 5,
+    "tactics": [
+      "mass_attack",
+      "economy_of_force",
+      "envelopment",
+      "delay_action",
+      "flanking_maneuver"
+    ],
+    "top_reward_features": [
+      {
+        "name": "maneuver_score",
+        "weight": 0.2565
+      },
+      {
+        "name": "mass_score",
+        "weight": 0.2446
+      },
+      {
+        "name": "ammo_level",
+        "weight": 0.1671
+      },
+      {
+        "name": "force_size_penalty",
+        "weight": 0.143
+      },
+      {
+        "name": "blue_force_ratio",
+        "weight": 0.1292
+      }
+    ]
+  }
+}

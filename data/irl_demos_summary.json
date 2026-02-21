@@ -1,0 +1,48 @@
+{
+  "n_demos": 100,
+  "tactics": [
+    "mass_attack",
+    "economy_of_force",
+    "envelopment",
+    "delay_action",
+    "flanking_maneuver"
+  ],
+  "episode_len": 15,
+  "learned_reward_weights": {
+    "blue_force_ratio": 0.1292,
+    "casualty_efficiency": 0.0669,
+    "force_size_penalty": 0.143,
+    "mass_score": 0.2446,
+    "offensive_score": 0.0711,
+    "security_score": 0.0848,
+    "maneuver_score": 0.2565,
+    "ammo_level": 0.1671,
+    "fuel_level": 0.0443,
+    "time_pressure": 0.1095,
+    "flanking_bonus": 0.0451,
+    "envelopment_bonus": 0.0472
+  },
+  "final_training_loss": 0.128261,
+  "top_features": [
+    {
+      "name": "maneuver_score",
+      "weight": 0.2565
+    },
+    {
+      "name": "mass_score",
+      "weight": 0.2446
+    },
+    {
+      "name": "ammo_level",
+      "weight": 0.1671
+    },
+    {
+      "name": "force_size_penalty",
+      "weight": 0.143
+    },
+    {
+      "name": "blue_force_ratio",
+      "weight": 0.1292
+    }
+  ]
+}
