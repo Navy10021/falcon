@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦅 FALCON
+# 🦅 FALCON : AI-Combat Model
 ### **F**orce-**A**daptive **L**earning for **C**ombat **O**ptimization **N**etwork
 
 *Ontology-Driven GNN + Adversarial Reinforcement Learning for Minimum-Force Warfare*
