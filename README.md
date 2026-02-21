@@ -150,3 +150,11 @@ For meaningful policy quality checks, run training first and evaluate with a che
 ## 📄 License
 
 MIT License.
+
+<div align="center">
+
+🧠 AI Combat Optimization System v2https://www.google.com/search?q=.0
+
+"To save troops is to save lives"
+
+</div>
