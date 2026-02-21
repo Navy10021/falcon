@@ -153,7 +153,7 @@ MIT License.
 
 <div align="center">
 
-🧠 AI Combat Optimization System v2https://www.google.com/search?q=.0
+🧠 AI Combat Optimization System v2.0
 
 "To save troops is to save lives"
 
