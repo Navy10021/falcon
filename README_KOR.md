@@ -262,16 +262,16 @@ evaluation/
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                  FULL SYSTEM PIPELINE                    │
-│                                                          │
-│  🗂️ Ontology  ──▶  ⚔️ Simulator  ──▶  🕸️ GNN           │
-│  전장 지식 구조화    전투 환경·Fog of War  상황인식·불확실성   │
-│                                          │              │
-│  📊 Evaluation  ◀── 🎯 HITL      ◀── 🤖 RL Agent       │
-│  Monte Carlo 검증   인간-AI 협력      Self-Play 최적화    │
-│                          │                              │
-│                    💡 Explainability                     │
-│                    AAR + 어텐션 시각화                    │
+                  FULL SYSTEM PIPELINE                    
+                                                          
+  🗂️ Ontology  ──▶  ⚔️ Simulator  ──▶  🕸️ GNN           
+  전장 지식 구조화    전투 환경·Fog of War  상황인식·불확실성   
+                                          │              
+  📊 Evaluation  ◀── 🎯 HITL      ◀── 🤖 RL Agent       
+  Monte Carlo 검증   인간-AI 협력      Self-Play 최적화    
+                          │                              
+                    💡 Explainability                     
+                    AAR + 어텐션 시각화                    
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -518,21 +518,7 @@ ADP 9대 원칙 자동 평가 + Pareto 생성 + Meaningful Human Control 충족�
 
 ---
 
-## 9. 📚 참고 문헌
-
-| 분야 | 논문 |
-|------|------|
-| **GNN** | Hu et al. (2020). *Heterogeneous Graph Transformer*. WWW. |
-| **RL** | Schulman et al. (2017). *Proximal Policy Optimization*. arXiv. |
-| **Self-Play** | Silver et al. (2017). *Mastering Chess and Shogi by Self-Play*. Science. |
-| **Bayesian** | Gal & Ghahramani (2016). *Dropout as a Bayesian Approximation*. ICML. |
-| **IRL** | Ziebart et al. (2008). *Maximum Entropy IRL*. AAAI. |
-| **HITL** | Amershi et al. (2019). *Guidelines for Human-AI Interaction*. CHI. |
-| **전투** | Lanchester (1916). *Aircraft in Warfare*. |
-
----
-
-## 10. ⚠️ 면책 조항 & 윤리
+## 9. ⚠️ 면책 조항 & 윤리
 
 > 본 시스템은 **완전히 합성된 가상 전투 데이터**를 사용하며, **학술 연구 및 AI 방법론 연구 목적으로만** 활용됩니다. 실제 작전 정보나 기밀 정보를 포함하지 않습니다.
 
@@ -542,7 +528,7 @@ ADP 9대 원칙 자동 평가 + Pareto 생성 + Meaningful Human Control 충족�
 
 ---
 
-## 11. 📄 라이선스
+## 10. 📄 라이선스
 
 MIT License — 학술 연구, 교육, 비상업적 목적으로 자유롭게 사용 가능합니다.
 
