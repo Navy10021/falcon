@@ -75,6 +75,8 @@ class ParetoStrategyGenerator:
         self.n_candidates = n_candidates
         self.mc_eval_runs = mc_eval_runs
         self._last_generated: List[StrategyOption] = []
+        self.last_generation_all_violated: bool = False
+        self.last_generation_note: str = ""
 
     def generate(
         self,
@@ -106,8 +108,12 @@ class ParetoStrategyGenerator:
         valid_candidates = [c for c in candidates
                            if not self._violates_hard_constraints(c, constraints)]
 
+        self.last_generation_all_violated = False
+        self.last_generation_note = ""
         if not valid_candidates:
-            valid_candidates = candidates  # 모두 위반 시 전체 반환
+            self.last_generation_all_violated = True
+            self.last_generation_note = "모든 후보가 hard constraint를 위반하여 최소 위반 후보를 반환합니다."
+            valid_candidates = self._select_min_violation_candidates(candidates)
 
         # Pareto 프론트 계산
         pareto_front = self._compute_pareto_front(valid_candidates)
@@ -290,6 +296,27 @@ class ParetoStrategyGenerator:
         pareto.sort(key=balance_score, reverse=True)
         return pareto
 
+
+    def _select_min_violation_candidates(self, candidates: List[StrategyOption]) -> List[StrategyOption]:
+        """모든 후보가 위반인 경우 최소 위반(개수/심각도) 후보 우선 선택"""
+        def violation_penalty(option: StrategyOption) -> float:
+            penalty = float(len(option.constraint_violations))
+            for v in option.constraint_violations:
+                if "병력 초과" in v:
+                    penalty += 1.5
+                elif "승률 미달" in v:
+                    penalty += 1.5
+                elif "사상자 초과" in v:
+                    penalty += 1.0
+                elif "시간 초과" in v:
+                    penalty += 0.8
+                else:
+                    penalty += 0.5
+            return penalty
+
+        ranked = sorted(candidates, key=violation_penalty)
+        return ranked[:max(1, self.n_candidates)]
+
     def display_options(self, options: List[StrategyOption]) -> str:
         """전략 후보 출력 텍스트 생성"""
         lines = [
@@ -297,6 +324,8 @@ class ParetoStrategyGenerator:
             "🎯 Pareto 최적 전략 후보안",
             "═" * 70,
         ]
+        if self.last_generation_all_violated:
+            lines.append(f"⚠️ {self.last_generation_note}")
         for opt in options:
             lines.append(f"\n📌 [{opt.option_id.upper()}] {opt.label}")
             lines.append(f"   투입 병력:     {opt.force_size}명")
