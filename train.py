@@ -84,6 +84,8 @@ def train_phase1(args):
                 gnn_out["epistemic_uncertainty"].item(),
                 gnn_out["aleatoric_uncertainty"].item(),
             ], dtype=np.float32)
+            gnn_ext = np.nan_to_num(gnn_ext, nan=0.0, posinf=10.0, neginf=-10.0)
+            gnn_ext = np.clip(gnn_ext, -10.0, 10.0).astype(np.float32)
 
             # PPO 상태
             state = build_state_vector(obs_kg, gnn_extension=gnn_ext,

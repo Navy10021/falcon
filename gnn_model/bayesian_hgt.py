@@ -220,8 +220,10 @@ class BayesianHGT(nn.Module):
         epistemic_risk = risk_means_t.var(dim=0)
 
         # Aleatoric uncertainty: 예측 로그 분산의 평균 (데이터 노이즈)
-        aleatoric_cas  = torch.stack(casualty_logvars).exp().mean(dim=0)
-        aleatoric_risk = torch.stack(risk_logvars).exp().mean(dim=0)
+        cas_logvars_t = torch.stack(casualty_logvars)
+        risk_logvars_t = torch.stack(risk_logvars)
+        aleatoric_cas  = torch.exp(torch.clamp(cas_logvars_t, min=-10.0, max=10.0)).mean(dim=0)
+        aleatoric_risk = torch.exp(torch.clamp(risk_logvars_t, min=-10.0, max=10.0)).mean(dim=0)
 
         return {
             # 예측값
