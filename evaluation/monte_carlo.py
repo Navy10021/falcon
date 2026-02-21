@@ -59,7 +59,9 @@ class MonteCarloEvaluator:
         engine,         # LanchesterEngine
         fog_filter=None,
         scenario_kwargs: Optional[Dict] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        show_progress: bool = True,
+        max_steps: int = 50
     ) -> MCEvaluationReport:
         """
         Monte Carlo 평가 실행
@@ -71,7 +73,7 @@ class MonteCarloEvaluator:
         scenario_kw = scenario_kwargs or {}
 
         iterator = range(self.n_runs)
-        if verbose:
+        if verbose and show_progress:
             iterator = tqdm(iterator, desc="Monte Carlo 평가")
 
         for run_id in iterator:
@@ -89,7 +91,7 @@ class MonteCarloEvaluator:
             winner = "draw"
             n_steps = 0
 
-            for step_t in range(50):
+            for step_t in range(max_steps):
                 if fog_filter:
                     obs_kg, uncertainty = fog_filter.observe(kg, ForceAlignment.BLUE)
                     state = build_state_vector(obs_kg, uncertainty_map=uncertainty)
