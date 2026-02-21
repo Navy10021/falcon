@@ -46,9 +46,40 @@ FALCON integrates four major capabilities in one pipeline:
 ## 🏗️ Architecture
 
 ```text
-Ontology/Scenario -> Simulator/Fog -> Bayesian GNN -> RL Agents (Blue/Red)
-                                     -> HITL Pareto options + preference learning
-                                     -> Explainability + Evaluation
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                            FALCON END-TO-END PIPELINE                        │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+[1] Knowledge & Scenario Layer
+    ontology/combat_schema + doctrine_encoder + scenario factory
+            │
+            ▼
+[2] Simulation & Partial Observation Layer
+    simulator/lanchester_engine + fog_of_war + resource/maneuver dynamics
+            │
+            ▼
+[3] Uncertainty Modeling Layer
+    gnn_model/bayesian_hgt (MC Dropout)
+    ├─ casualty_mean / casualty_ci
+    ├─ epistemic uncertainty
+    └─ aleatoric uncertainty
+            │
+            ▼
+[4] Decision Policy Layer (Adversarial RL)
+    rl_agent/blue_agent  ⇄  rl_agent/red_agent
+    self_play_trainer (Phase A→D curriculum)
+            │
+            ├──────────────────────────────────────────────┐
+            ▼                                              ▼
+[5A] Human-in-the-Loop Layer                      [5B] Explainability Layer
+     hitl/constraint_parser                             explainability/attention_viz
+     hitl/pareto_generator                              explainability/auto_aar
+     hitl/preference_learner                            counterfactual analysis
+            │                                              │
+            └──────────────────────────────┬───────────────┘
+                                           ▼
+[6] Evaluation & Reporting Layer
+    evaluation/monte_carlo + historical_benchmark + robustness metrics
 ```
 
 ### Main modules
