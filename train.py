@@ -6,12 +6,15 @@ Phase 1 / Phase 2 / Phase 3 선택적 실행
 """
 
 import argparse
+import json
 import os
 import sys
 import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+from utils.reproducibility import set_global_seed
 
 
 def train_phase1(args):
@@ -81,6 +84,8 @@ def train_phase1(args):
                 gnn_out["epistemic_uncertainty"].item(),
                 gnn_out["aleatoric_uncertainty"].item(),
             ], dtype=np.float32)
+            gnn_ext = np.nan_to_num(gnn_ext, nan=0.0, posinf=10.0, neginf=-10.0)
+            gnn_ext = np.clip(gnn_ext, -10.0, 10.0).astype(np.float32)
 
             # PPO 상태
             state = build_state_vector(obs_kg, gnn_extension=gnn_ext,
@@ -173,10 +178,106 @@ def train_phase2(args):
             print(f"   {k}: {v}")
 
 
+def train_phase3(args):
+    """Phase 3: HITL 통합 루프"""
+    print("🟣 Phase 3: HITL 통합 훈련 시작")
+
+    from ontology.combat_schema import ScenarioFactory
+    from hitl.pareto_generator import ParetoStrategyGenerator, CommanderConstraints
+    from hitl.preference_learner import CommanderPreferenceLearner, SelectionRecord
+
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
+
+    generator = ParetoStrategyGenerator(n_candidates=5)
+    learner = CommanderPreferenceLearner(commander_id="phase3_commander")
+    phase3_stats = {"episodes": args.episodes, "all_violated_episodes": 0}
+
+    for ep in range(args.episodes):
+        kg = ScenarioFactory.create_standard_scenario(
+            n_blue=np.random.randint(5, 12),
+            n_red=np.random.randint(4, 9),
+            seed=args.seed + ep,
+        )
+
+        constraints = CommanderConstraints(
+            min_win_probability=0.55,
+            max_time_steps=50,
+            prefer_flanking=(ep % 3 == 0),
+            prefer_artillery=(ep % 4 == 0),
+            avoid_urban=(ep % 5 == 0),
+        )
+
+        options = generator.generate(kg, constraints=constraints)
+        if generator.last_generation_all_violated:
+            phase3_stats["all_violated_episodes"] += 1
+        ranked_options = learner.get_personalized_ranking(options)
+
+        ai_recommended = ranked_options[0]
+        # 모의 HITL 채택: 기본 70%는 AI 추천 수용, 30%는 차선책 선택
+        accept_prob = 0.70
+        if len(ranked_options) > 1 and np.random.rand() > accept_prob:
+            selected = ranked_options[1]
+            feedback_rating = 3
+        else:
+            selected = ai_recommended
+            feedback_rating = 5
+
+        learner.record_selection(
+            SelectionRecord(
+                scenario_id=ep,
+                options_presented=[o.option_id for o in ranked_options],
+                selected_option_id=selected.option_id,
+                selected_type=selected.strategy_type.value,
+                force_size=selected.force_size,
+                win_probability=selected.win_probability,
+                expected_casualties=selected.expected_casualties,
+                feedback_rating=feedback_rating,
+                ai_recommended_option_id=ai_recommended.option_id,
+            )
+        )
+
+        if ep % args.log_interval == 0 and ep > 0:
+            print(
+                f"  EP {ep:5d}/{args.episodes} | "
+                f"Adoption={learner.adoption_rate:.1%} | "
+                f"AI={ai_recommended.label:8s} | "
+                f"Selected={selected.label:8s} | "
+                f"WinP={selected.win_probability:.1%}"
+            )
+
+    pref_path = os.path.join(args.checkpoint_dir, "hitl_phase3_preferences.json")
+    metrics_path = os.path.join(args.checkpoint_dir, "hitl_phase3_metrics.json")
+    run_cfg_path = os.path.join(args.checkpoint_dir, "hitl_phase3_run_config.json")
+
+    learner.save(pref_path)
+
+    phase3_stats["adoption_rate"] = learner.adoption_rate
+    phase3_stats["all_violated_ratio"] = (
+        phase3_stats["all_violated_episodes"] / max(args.episodes, 1)
+    )
+    with open(metrics_path, "w") as f:
+        json.dump(phase3_stats, f, indent=2)
+
+    with open(run_cfg_path, "w") as f:
+        json.dump({
+            "phase": args.phase,
+            "episodes": args.episodes,
+            "seed": args.seed,
+            "hitl": args.hitl,
+            "log_interval": args.log_interval,
+            "checkpoint_dir": args.checkpoint_dir
+        }, f, indent=2)
+
+    print("\n✅ Phase 3 HITL 통합 완료!")
+    print(f"   AI 추천 채택률: {learner.adoption_rate:.1%}")
+    print(f"   선호도 저장: {pref_path}")
+    print(f"   메트릭 저장: {metrics_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="AI Combat Optimization System Training")
-    parser.add_argument("--phase", type=int, default=1, choices=[1, 2],
-                        help="학습 Phase (1: GNN+PPO, 2: Self-Play)")
+    parser.add_argument("--phase", type=int, default=1, choices=[1, 2, 3],
+                        help="학습 Phase (1: GNN+PPO, 2: Self-Play, 3: HITL preference learning loop)")
     parser.add_argument("--episodes", type=int, default=500, help="에피소드 수")
     parser.add_argument("--lr", type=float, default=3e-4, help="학습률")
     parser.add_argument("--seed", type=int, default=42, help="랜덤 시드")
@@ -185,6 +286,7 @@ def main():
     parser.add_argument("--log-interval", type=int, default=50, help="로깅 간격")
     parser.add_argument("--save-interval", type=int, default=200, help="저장 간격")
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="체크포인트 저장 경로")
+    parser.add_argument("--hitl", action="store_true", help="Phase 3 HITL 통합 루프 활성화")
 
     args = parser.parse_args()
 
@@ -192,13 +294,16 @@ def main():
     print(f"   Phase {args.phase} | Episodes: {args.episodes} | Seed: {args.seed}")
     print("─" * 50)
 
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    set_global_seed(args.seed)
 
     if args.phase == 1:
         train_phase1(args)
     elif args.phase == 2:
         train_phase2(args)
+    elif args.phase == 3:
+        if not args.hitl:
+            print("⚠️  Phase 3는 --hitl 옵션과 함께 실행하는 것을 권장합니다.")
+        train_phase3(args)
 
 
 if __name__ == "__main__":
