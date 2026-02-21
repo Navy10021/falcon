@@ -117,6 +117,8 @@ def build_state_vector(
     # 64차원으로 패딩
     result = np.zeros(STATE_DIM, dtype=np.float32)
     result[:len(combined)] = combined[:STATE_DIM]
+    result = np.nan_to_num(result, nan=0.0, posinf=10.0, neginf=-10.0)
+    result = np.clip(result, -10.0, 10.0).astype(np.float32)
     return result
 
 
@@ -178,9 +180,12 @@ class ActorCritic(nn.Module):
         """
         상태 → (행동, 로그 확률, 가치)
         """
-        x = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        safe_state = np.nan_to_num(state, nan=0.0, posinf=10.0, neginf=-10.0).astype(np.float32)
+        x = torch.tensor(safe_state, dtype=torch.float32).unsqueeze(0)
         with torch.no_grad():
             logits, value = self(x)
+            logits = torch.nan_to_num(logits, nan=0.0, posinf=20.0, neginf=-20.0)
+            value = torch.nan_to_num(value, nan=0.0, posinf=1e3, neginf=-1e3)
         dist = torch.distributions.Categorical(logits=logits)
         if deterministic:
             action = logits.argmax(dim=-1).item()
@@ -340,7 +345,8 @@ class BlueAgent:
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # 텐서 변환
-        states_t   = torch.tensor(np.array(buf.states),   dtype=torch.float32).to(self.device)
+        states_np = np.nan_to_num(np.array(buf.states), nan=0.0, posinf=10.0, neginf=-10.0).astype(np.float32)
+        states_t   = torch.tensor(states_np, dtype=torch.float32).to(self.device)
         actions_t  = torch.tensor(buf.actions,             dtype=torch.long).to(self.device)
         old_lp_t   = torch.tensor(buf.log_probs,          dtype=torch.float32).to(self.device)
         adv_t      = torch.tensor(advantages,             dtype=torch.float32).to(self.device)
@@ -355,6 +361,8 @@ class BlueAgent:
                 batch_idx = torch.tensor(idx[start:start + cfg.batch_size])
 
                 logits, values_pred = self.network(states_t[batch_idx])
+                logits = torch.nan_to_num(logits, nan=0.0, posinf=20.0, neginf=-20.0)
+                values_pred = torch.nan_to_num(values_pred, nan=0.0, posinf=1e3, neginf=-1e3)
                 dist = torch.distributions.Categorical(logits=logits)
                 new_lp = dist.log_prob(actions_t[batch_idx])
                 entropy = dist.entropy().mean()
@@ -373,6 +381,8 @@ class BlueAgent:
                         - cfg.entropy_coef * entropy)
 
                 self.optimizer.zero_grad()
+                if not torch.isfinite(loss):
+                    continue
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.network.parameters(), cfg.max_grad_norm)
                 self.optimizer.step()

@@ -34,6 +34,7 @@ class SelfPlayConfig:
     log_interval: int = 50
     save_interval: int = 500
     checkpoint_dir: str = "checkpoints"
+    timeout_result_mode: str = "headcount"   # headcount | draw
 
     # Self-Play 단계
     phase_a_end: float = 0.2   # Phase A: Red 고정
@@ -103,6 +104,61 @@ class SelfPlayTrainer:
         action = int(np.random.choice([RedActionSpace.AMBUSH, RedActionSpace.FORTIFY]))
         return action, 0.0, 0.0
 
+    def _active_units(self, kg, alignment):
+        from ontology.combat_schema import UnitStatus
+        return [u for u in kg.units.values() if u.alignment == alignment and u.status != UnitStatus.DESTROYED and u.headcount > 0]
+
+    def _build_action_pairs(self, kg, blue_action: int, red_action: int):
+        """간단한 행동-교전 매핑: 선택 행동이 표적 우선순위에 반영되도록 구성"""
+        blue_units = self._active_units(kg, ForceAlignment.BLUE)
+        red_units = self._active_units(kg, ForceAlignment.RED)
+        if not blue_units or not red_units:
+            return None
+
+        def pick_targets(units, mode: str):
+            if mode == "weakest":
+                return sorted(units, key=lambda u: u.headcount)
+            if mode == "strongest":
+                return sorted(units, key=lambda u: u.combat_power, reverse=True)
+            return sorted(units, key=lambda u: u.headcount, reverse=True)
+
+        blue_mode = {
+            BlueActionSpace.ADVANCE: "weakest",
+            BlueActionSpace.FLANK: "weakest",
+            BlueActionSpace.REINFORCE: "strongest",
+            BlueActionSpace.SUPPORT: "strongest",
+            BlueActionSpace.REALLOCATE: "balanced",
+            BlueActionSpace.WITHDRAW: "balanced",
+        }.get(int(blue_action), "balanced")
+
+        red_mode = {
+            RedActionSpace.AMBUSH: "weakest",
+            RedActionSpace.FORTIFY: "strongest",
+            RedActionSpace.DECEPTION: "strongest",
+        }.get(int(red_action), "balanced")
+
+        blue_targets = pick_targets(red_units, blue_mode)
+        red_targets = pick_targets(blue_units, red_mode)
+
+        pairs = []
+        blue_attackers = blue_units
+        if int(blue_action) == BlueActionSpace.WITHDRAW:
+            blue_attackers = blue_units[:max(1, len(blue_units)//2)]
+
+        for i, attacker in enumerate(blue_attackers):
+            target = blue_targets[i % len(blue_targets)]
+            pairs.append((attacker.unit_id, target.unit_id))
+
+        red_attackers = red_units
+        if int(red_action) == RedActionSpace.FORTIFY:
+            red_attackers = red_units[:max(1, len(red_units)//2)]
+
+        for i, attacker in enumerate(red_attackers):
+            target = red_targets[i % len(red_targets)]
+            pairs.append((attacker.unit_id, target.unit_id))
+
+        return pairs
+
     def run_episode(
         self,
         episode_idx: int,
@@ -153,8 +209,9 @@ class SelfPlayTrainer:
             if red_action == RedActionSpace.DECEPTION:
                 red_agent.apply_deception(fog_filter)
 
-            # 시뮬레이션 스텝
-            step_result = self.engine.run_step(kg)
+            # 시뮬레이션 스텝 (행동 기반 교전 쌍 반영)
+            action_pairs = self._build_action_pairs(kg, blue_action, red_action)
+            step_result = self.engine.run_step(kg, action_pairs=action_pairs)
             blue_total_cas += step_result.blue_total_casualties
             red_total_cas  += step_result.red_total_casualties
 
@@ -191,6 +248,15 @@ class SelfPlayTrainer:
         force_reduction = (initial_blue_hc - final_blue_hc) / max(initial_blue_hc, 1)
 
         winner = step_result.mission_status if 'step_result' in dir() else "draw"
+        if winner == "ongoing" and cfg.timeout_result_mode == "headcount":
+            blue_hc = final_blue_hc
+            red_hc = sum(u.headcount for u in kg.units.values() if u.alignment == ForceAlignment.RED)
+            if blue_hc > red_hc * 1.05:
+                winner = "blue_win"
+            elif red_hc > blue_hc * 1.05:
+                winner = "red_win"
+            else:
+                winner = "draw"
 
         return EpisodeStats(
             episode=episode_idx,
@@ -289,10 +355,15 @@ class SelfPlayTrainer:
             if ep % cfg.log_interval == 0 and ep > 0:
                 recent = self.stats[-50:] if len(self.stats) >= 50 else self.stats
                 blue_wr = sum(1 for s in recent if s.winner == "blue_win") / len(recent)
+                red_wr = sum(1 for s in recent if s.winner == "red_win") / len(recent)
+                draw_wr = sum(1 for s in recent if s.winner == "draw") / len(recent)
+                resolved = [s for s in recent if s.winner in ("blue_win", "red_win")]
+                blue_wr_resolved = (sum(1 for s in resolved if s.winner == "blue_win") / max(len(resolved), 1))
                 avg_cas = np.mean([s.blue_casualties for s in recent])
                 avg_force_reduction = np.mean([s.blue_force_reduction for s in recent])
                 nash = self.nash_gaps[-1] if self.nash_gaps else 0.0
-                print(f"\n  EP {ep:5d} | Phase={phase} | Blue WR={blue_wr:.1%} | "
+                print(f"\n  EP {ep:5d} | Phase={phase} | Blue WR={blue_wr:.1%} (resolved={blue_wr_resolved:.1%}) | "
+                      f"Red WR={red_wr:.1%} | Draw={draw_wr:.1%} | "
                       f"Avg Cas={avg_cas:.1f} | Force Reduction={avg_force_reduction:.1%} | "
                       f"Nash Gap={nash:.4f}")
 
@@ -312,10 +383,14 @@ class SelfPlayTrainer:
 
     def _compute_final_stats(self) -> Dict:
         recent = self.stats[-200:] if len(self.stats) >= 200 else self.stats
+        resolved = [s for s in recent if s.winner in ("blue_win", "red_win")]
         return {
             "total_episodes": len(self.stats),
             "blue_win_rate": sum(1 for s in recent if s.winner == "blue_win") / max(len(recent), 1),
             "red_win_rate":  sum(1 for s in recent if s.winner == "red_win")  / max(len(recent), 1),
+            "draw_rate": sum(1 for s in recent if s.winner == "draw") / max(len(recent), 1),
+            "blue_win_rate_resolved": sum(1 for s in resolved if s.winner == "blue_win") / max(len(resolved), 1),
+            "resolved_ratio": len(resolved) / max(len(recent), 1),
             "avg_blue_casualties": np.mean([s.blue_casualties for s in recent]),
             "avg_red_casualties":  np.mean([s.red_casualties  for s in recent]),
             "avg_force_reduction": np.mean([s.blue_force_reduction for s in recent]),
