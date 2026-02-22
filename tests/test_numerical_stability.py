@@ -25,7 +25,7 @@ def main():
     fog = FogOfWarFilter(FogLevel.MODERATE, seed=42)
     obs_kg, _ = fog.observe(kg, ForceAlignment.BLUE)
     x, adj = prepare_graph_tensors(obs_kg)
-    gnn = BayesianHGT(node_in_dim=32, hidden_dim=64, n_layers=2, mc_samples=5)
+    gnn = BayesianHGT(node_in_dim=128, hidden_dim=64, n_layers=2, mc_samples=5)
     out = gnn.predict_with_uncertainty(x, adj)
     for k, v in out.items():
         val = float(v.item())
