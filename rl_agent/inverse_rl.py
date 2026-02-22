@@ -380,6 +380,115 @@ class RewardFunctionAnalyzer:
         return "\n".join(lines)
 
 
+# ── P3-4: IRL 보상 로더 ─────────────────────────────────────────────
+
+class IRLRewardLoader:
+    """
+    P3-4: data/irl_demos_summary.json에서 사전 학습된 IRL 보상 가중치를 로드하고
+    실시간 전투 상태에 적용해 IRL 보너스를 계산한다.
+
+    사용 예:
+        irl_loader = IRLRewardLoader.from_file("data/irl_demos_summary.json")
+        bonus = irl_loader.compute_irl_bonus(kg, step_result, maneuver_result)
+    """
+
+    _IRL_BONUS_SCALE = 0.5   # 전체 IRL 보상 배율 (PPO 보상에 더해지는 비율)
+
+    def __init__(self, learned_reward: "LearnedReward"):
+        self.learned_reward = learned_reward
+
+    @classmethod
+    def from_file(cls, path: str) -> "IRLRewardLoader":
+        """
+        JSON 파일에서 사전 학습된 IRL 가중치 로드.
+
+        Parameters
+        ----------
+        path : str
+            data/irl_demos_summary.json 경로
+        """
+        import json, os
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"IRL 데이터 파일 없음: {path}")
+        with open(path) as f:
+            data = json.load(f)
+
+        raw_weights = data.get("learned_reward_weights", {})
+        weights_arr = np.array(
+            [raw_weights.get(name, 0.0) for name in FEATURE_NAMES],
+            dtype=np.float32,
+        )
+        # 단위 정규화
+        norm = np.linalg.norm(weights_arr)
+        if norm > 0:
+            weights_arr = weights_arr / norm
+
+        learned = LearnedReward(
+            weights=weights_arr,
+            feature_names=FEATURE_NAMES,
+            training_loss=[data.get("final_training_loss", 0.0)],
+            n_demos=data.get("n_demos", 0),
+        )
+        return cls(learned)
+
+    def _build_state_dict(self, kg, step_result, maneuver_result: Optional[Dict] = None) -> Dict:
+        """
+        CombatKnowledgeGraph + BattleStep + ManeuverResult → 12차원 피처 딕셔너리 변환.
+        """
+        from ontology.combat_schema import ForceAlignment, UnitStatus
+
+        blue = [u for u in kg.units.values()
+                if u.alignment == ForceAlignment.BLUE and u.status != UnitStatus.DESTROYED]
+        red  = [u for u in kg.units.values()
+                if u.alignment == ForceAlignment.RED  and u.status != UnitStatus.DESTROYED]
+
+        blue_cp  = sum(u.combat_power for u in blue)
+        red_cp   = sum(u.combat_power for u in red)
+        total_cp = blue_cp + red_cp + 1e-8
+
+        blue_cas = step_result.blue_total_casualties
+        red_cas  = step_result.red_total_casualties
+
+        avg_ammo = float(np.mean([u.capability.ammo_level for u in blue])) if blue else 0.5
+        avg_fuel = float(np.mean([u.capability.fuel_level  for u in blue])) if blue else 0.5
+
+        high_cp = [u for u in blue if u.combat_power > 2.0]
+        mass_score = len(high_cp) / max(len(blue), 1)
+
+        n_engageable  = (maneuver_result or {}).get("n_engageable", 0)
+        flanking_cnt  = (maneuver_result or {}).get("flanking_units", 0)
+        envelop_flag  = float((maneuver_result or {}).get("enveloping", False))
+
+        return {
+            "blue_force_ratio":     blue_cp / total_cp,
+            "casualty_efficiency":  red_cas  / max(blue_cas, 1),
+            "force_size_penalty":   1.0 - len(blue) / max(len(blue) + len(red), 1),
+            "mass_score":           mass_score,
+            "offensive_score":      float(np.clip(blue_cp / (red_cp + 1e-8) / 2, 0, 1)),
+            "security_score":       (avg_ammo + avg_fuel) / 2,
+            "maneuver_score":       float(np.clip(n_engageable * 0.1, 0, 1)),
+            "ammo_level":           avg_ammo,
+            "fuel_level":           avg_fuel,
+            "time_pressure":        0.5,   # 스텝 진행도 미연동 (근사치)
+            "flanking_bonus":       float(flanking_cnt > 0),
+            "envelopment_bonus":    envelop_flag,
+        }
+
+    def compute_irl_bonus(self, kg, step_result, maneuver_result: Optional[Dict] = None) -> float:
+        """
+        현재 전투 상태에서 IRL 보상 보너스를 계산한다.
+
+        Returns
+        -------
+        float
+            IRL 보너스 값 (PPO 보상에 더해짐). 양수 = 교리 준수 행동 강화.
+        """
+        state_dict = self._build_state_dict(kg, step_result, maneuver_result)
+        feature_vec = extract_features(state_dict)
+        raw_reward  = self.learned_reward.compute(feature_vec)
+        return float(raw_reward * self._IRL_BONUS_SCALE)
+
+
 if __name__ == "__main__":
     print("="*55)
     print("B. 역강화학습 (Max-Entropy IRL) 테스트")
