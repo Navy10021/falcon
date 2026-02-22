@@ -8,6 +8,7 @@ Phase 3: Pareto 최적 전략 후보 생성기
 """
 
 from __future__ import annotations
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
@@ -92,8 +93,11 @@ class ParetoStrategyGenerator:
         from ontology.combat_schema import ForceAlignment, UnitStatus
         blue_units = [u for u in kg.units.values()
                       if u.alignment == ForceAlignment.BLUE and u.status != UnitStatus.DESTROYED]
-        available_force = sum(u.headcount for u in blue_units)
-        blue_combat_power = sum(u.combat_power for u in blue_units)
+        red_units  = [u for u in kg.units.values()
+                      if u.alignment == ForceAlignment.RED  and u.status != UnitStatus.DESTROYED]
+        available_force   = sum(u.headcount     for u in blue_units)
+        blue_combat_power = sum(u.combat_power  for u in blue_units)
+        red_combat_power  = sum(u.combat_power  for u in red_units)
 
         uncertainty = 0.0
         if gnn_output:
@@ -101,7 +105,7 @@ class ParetoStrategyGenerator:
 
         # Monte Carlo 평가로 각 전략 시뮬레이션
         candidates = self._generate_candidate_strategies(
-            available_force, blue_combat_power, uncertainty, constraints
+            available_force, blue_combat_power, red_combat_power, uncertainty, constraints
         )
 
         # Pareto 필터링 (제약 조건 위반 후보 제거)
@@ -121,21 +125,46 @@ class ParetoStrategyGenerator:
         self._last_generated = pareto_front[:self.n_candidates]
         return self._last_generated
 
+    @staticmethod
+    def _dynamic_win_base(blue_cp: float, red_cp: float, win_delta: float = 0.0) -> float:
+        """
+        전투력 비율 기반 동적 win_base 계산.
+
+        cp_ratio = blue_cp / red_cp 에 대해 logistic 함수로 매핑.
+        k=2.5 로 설정 시: ratio=1.0 → 0.50, 1.5 → 0.73, 0.7 → 0.32
+
+        Parameters
+        ----------
+        blue_cp, red_cp : float
+            아군/적군 전투력 합계.
+        win_delta : float
+            전략별 상대적 승률 조정값 (-1..+1).
+
+        Returns
+        -------
+        float
+            [0.10, 0.97] 로 클리핑된 예상 승률.
+        """
+        cp_ratio = blue_cp / max(red_cp, 1e-6)
+        k = 2.5
+        base = 1.0 / (1.0 + math.exp(-k * (cp_ratio - 1.0)))
+        return float(np.clip(base + win_delta, 0.10, 0.97))
+
     def _generate_candidate_strategies(
-        self, available_force: int, blue_cp: float,
+        self, available_force: int, blue_cp: float, red_cp: float,
         uncertainty: float, constraints: CommanderConstraints
     ) -> List[StrategyOption]:
-        """기본 전략 후보 생성"""
+        """기본 전략 후보 생성 (win_base를 전투력 비율로 동적 계산)"""
         candidates = []
         base_force = available_force
 
-        # 전략 파라미터 정의
+        # win_delta: 전략별 상대적 승률 조정값 (전투력 비율 기준 baseline에서의 편차)
         strategy_configs = [
             {
                 "type": StrategyType.MIN_FORCE,
                 "label": "최소 병력",
                 "force_ratio": 0.65,
-                "win_base": 0.72,
+                "win_delta": -0.08,   # 병력 절감으로 승률 소폭 하락
                 "cas_ratio": 0.12,
                 "time_ratio": 1.2,
                 "risk": "high",
@@ -145,7 +174,7 @@ class ParetoStrategyGenerator:
                 "type": StrategyType.BALANCED,
                 "label": "균형",
                 "force_ratio": 0.82,
-                "win_base": 0.81,
+                "win_delta":  0.00,   # 전투력 비율 그대로 반영
                 "cas_ratio": 0.08,
                 "time_ratio": 1.0,
                 "risk": "medium",
@@ -155,7 +184,7 @@ class ParetoStrategyGenerator:
                 "type": StrategyType.MAX_WIN_RATE,
                 "label": "최고 승률",
                 "force_ratio": 0.95,
-                "win_base": 0.89,
+                "win_delta": +0.07,   # 전병력 투입으로 승률 상승
                 "cas_ratio": 0.06,
                 "time_ratio": 0.9,
                 "risk": "low",
@@ -165,7 +194,7 @@ class ParetoStrategyGenerator:
                 "type": StrategyType.MIN_CASUALTY,
                 "label": "최저 사상자",
                 "force_ratio": 0.88,
-                "win_base": 0.83,
+                "win_delta": +0.02,   # 포병/간접화력 → 사상자 절감, 승률 소폭 상승
                 "cas_ratio": 0.04,
                 "time_ratio": 1.1,
                 "risk": "low",
@@ -175,7 +204,7 @@ class ParetoStrategyGenerator:
                 "type": StrategyType.MIN_TIME,
                 "label": "신속 완료",
                 "force_ratio": 0.90,
-                "win_base": 0.78,
+                "win_delta": -0.03,   # 속전속결로 위험 증가, 승률 소폭 하락
                 "cas_ratio": 0.10,
                 "time_ratio": 0.7,
                 "risk": "medium",
@@ -187,7 +216,13 @@ class ParetoStrategyGenerator:
             # 불확실성에 따른 조정
             uncertainty_adj = 1.0 + 0.2 * uncertainty
             force_ratio = min(cfg["force_ratio"] * uncertainty_adj, 1.0)
-            win_prob = max(cfg["win_base"] - 0.1 * uncertainty, 0.3)
+            # win_base: 전투력 비율 기반 동적 계산 + 불확실성 패널티
+            win_base = self._dynamic_win_base(
+                blue_cp * cfg["force_ratio"],   # 실제 투입 전투력 근사
+                red_cp,
+                win_delta=cfg["win_delta"],
+            )
+            win_prob = max(win_base - 0.05 * uncertainty, 0.10)
             cas_ratio = cfg["cas_ratio"] * uncertainty_adj
 
             force_size = int(base_force * force_ratio)

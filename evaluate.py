@@ -33,6 +33,10 @@ def main():
                         help="진행률 바 비활성화")
     parser.add_argument("--fast", action="store_true",
                         help="빠른 스모크 평가 프리셋 (monte-carlo=50, max-steps=30)")
+    parser.add_argument("--full", action="store_true",
+                        help="풀 평가 프리셋 (monte-carlo=5000, workers=4)")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="병렬 Monte Carlo 워커 수 (기본: 1, 순차)")
     args = parser.parse_args()
 
     set_global_seed(args.seed)
@@ -41,6 +45,11 @@ def main():
         args.monte_carlo = min(args.monte_carlo, 50)
         args.max_steps = min(args.max_steps, 30)
         print(f"⚡ Fast preset enabled: monte_carlo={args.monte_carlo}, max_steps={args.max_steps}")
+
+    if args.full and args.benchmark is None:
+        args.monte_carlo = max(args.monte_carlo, 5000)
+        args.workers = max(args.workers, 4)
+        print(f"🔬 Full preset enabled: monte_carlo={args.monte_carlo}, workers={args.workers}")
 
     from simulator.lanchester_engine import LanchesterEngine
     from simulator.fog_of_war import FogOfWarFilter, FogLevel
@@ -72,12 +81,19 @@ def main():
     }
     fog_filter = FogOfWarFilter(fog_level_map[args.fog_level], seed=args.seed)
 
-    print(f"\n📊 Monte Carlo 평가 시작 ({args.monte_carlo} runs, Fog={args.fog_level.upper()}, MaxSteps={args.max_steps})")
-    evaluator = MonteCarloEvaluator(n_runs=args.monte_carlo, seed=args.seed)
+    print(f"\n📊 Monte Carlo 평가 시작 ({args.monte_carlo} runs, Fog={args.fog_level.upper()}, "
+          f"MaxSteps={args.max_steps}, Workers={args.workers})")
+    evaluator = MonteCarloEvaluator(
+        n_runs=args.monte_carlo,
+        seed=args.seed,
+        n_workers=args.workers,
+        checkpoint_path=args.checkpoint if args.checkpoint else None,
+    )
     report = evaluator.evaluate(
-        blue_agent,
-        engine,
-        fog_filter=fog_filter,
+        agent=blue_agent if args.workers == 1 else None,
+        engine=engine    if args.workers == 1 else None,
+        fog_filter=fog_filter if args.workers == 1 else None,
+        fog_level_name=args.fog_level.upper() if args.workers > 1 else None,
         verbose=True,
         show_progress=not args.no_progress,
         max_steps=args.max_steps,

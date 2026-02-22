@@ -1,0 +1,19 @@
+# FALCON AI Combat Optimization System
+# Default configuration — CLI 인자로 개별 값 override 가능
+
+training:
+  episodes: 500
+  lr: 3.0e-4
+  seed: 42
+  mc_samples: 10
+  ppo_epochs: 4
+  log_interval: 50
+  save_interval: 200
+  checkpoint_dir: "checkpoints"
+
+evaluation:
+  monte_carlo: 500
+  seed: 0
+  fog_level: "moderate"   # clear | light | moderate | heavy | maximum
+  max_steps: 50
+  n_workers: 1            # P2-4: 병렬 평가 워커 수 (1 = sequential)

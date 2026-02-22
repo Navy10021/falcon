@@ -1,0 +1,8 @@
+# 평가 전용 설정
+
+evaluation:
+  monte_carlo: 500
+  seed: 0
+  fog_level: "moderate"
+  max_steps: 50
+  n_workers: 4            # 병렬 평가 워커 수

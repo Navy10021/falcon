@@ -1,0 +1,11 @@
+# Phase 3: HITL Preference Learning 설정
+
+training:
+  episodes: 200
+  lr: 3.0e-4
+  seed: 42
+  mc_samples: 10
+  ppo_epochs: 4
+  log_interval: 50
+  save_interval: 200
+  checkpoint_dir: "checkpoints"

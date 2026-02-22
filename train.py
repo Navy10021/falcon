@@ -6,7 +6,9 @@ Phase 1 / Phase 2 / Phase 3 선택적 실행
 """
 
 import argparse
+import datetime
 import json
+import logging
 import os
 import sys
 import numpy as np
@@ -15,6 +17,36 @@ import torch
 sys.path.insert(0, os.path.dirname(__file__))
 
 from utils.reproducibility import set_global_seed
+from utils.config_loader import load_config
+
+# 모듈 레벨 logger (main()에서 설정)
+logger = logging.getLogger("falcon")
+
+
+def setup_logger(checkpoint_dir: str, run_id: str) -> None:
+    """콘솔 + 파일 핸들러를 가진 루트 logger 설정."""
+    logger.setLevel(logging.DEBUG)
+
+    fmt = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-8s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    # 콘솔 핸들러 (INFO 이상)
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+
+    # 파일 핸들러 (DEBUG 이상)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    log_path = os.path.join(checkpoint_dir, f"run_{run_id}.log")
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+
+    logger.info("Log file: %s", log_path)
 
 
 def _build_blue_action_pairs(kg, blue_action, ForceAlignment, UnitStatus, BlueActionSpace):
@@ -61,7 +93,7 @@ def _build_blue_action_pairs(kg, blue_action, ForceAlignment, UnitStatus, BlueAc
 
 def train_phase1(args):
     """Phase 1: Uncertainty-Aware GNN + Blue PPO 훈련"""
-    print("🔵 Phase 1: Uncertainty-Aware GNN + PPO 훈련 시작")
+    logger.info("[Phase 1] Uncertainty-Aware GNN + PPO 훈련 시작")
 
     from ontology.combat_schema import ScenarioFactory, ForceAlignment, UnitStatus
     from simulator.lanchester_engine import LanchesterEngine
@@ -84,9 +116,8 @@ def train_phase1(args):
     win_rate_history = []
     gnn_losses = []
 
-    print(f"   총 에피소드: {args.episodes}")
-    print(f"   Fog 커리큘럼: Enabled")
-    print(f"   MC Dropout 샘플: {args.mc_samples}")
+    logger.info("  총 에피소드: %d | Fog 커리큘럼: Enabled | MC Dropout 샘플: %d",
+                args.episodes, args.mc_samples)
 
     for ep in range(args.episodes):
         progress = ep / args.episodes
@@ -145,10 +176,11 @@ def train_phase1(args):
             step_result = engine.run_step(kg, action_pairs=action_pairs)
             done = (step_result.mission_status != "ongoing")
 
-            # P1-1: prev_blue_hc 기반 스텝별 보상 계산
+            # P1-1: prev_blue_hc 기반 스텝별 보상 계산 (P2-6: initial_force_size 전달)
             reward = blue_agent.compute_reward(
                 step_result, prev_blue_hc,
-                step_result.blue_total_headcount, avg_unc
+                step_result.blue_total_headcount, avg_unc,
+                initial_force_size=initial_blue_hc,
             )
             prev_blue_hc = step_result.blue_total_headcount
             episode_reward += reward
@@ -191,26 +223,27 @@ def train_phase1(args):
             recent_wr = np.mean(win_rate_history[-50:]) if len(win_rate_history) >= 50 else np.mean(win_rate_history)
             recent_r  = np.mean(rewards_history[-50:])  if len(rewards_history) >= 50  else np.mean(rewards_history)
             gnn_l = np.mean(gnn_losses[-20:]) if gnn_losses else 0
-            print(f"  EP {ep:5d}/{args.episodes} | Fog={fog_level.name:8s} | "
-                  f"WR={recent_wr:.1%} | R={recent_r:.2f} | GNN Loss={gnn_l:.4f}")
+            logger.info("EP %5d/%d | Fog=%-8s | WR=%.1%% | R=%.2f | GNN Loss=%.4f",
+                        ep, args.episodes, fog_level.name,
+                        recent_wr, recent_r, gnn_l)
 
         # 체크포인트
         if ep > 0 and ep % args.save_interval == 0:
             ckpt_path = os.path.join(args.checkpoint_dir, f"blue_phase1_ep{ep}.pt")
             blue_agent.save(ckpt_path)
             torch.save(gnn.state_dict(), ckpt_path.replace("blue_", "gnn_"))
-            print(f"  💾 체크포인트 저장: {ckpt_path}")
+            logger.info("체크포인트 저장: %s", ckpt_path)
 
     # 최종 저장
     blue_agent.save(os.path.join(args.checkpoint_dir, "blue_phase1_final.pt"))
     torch.save(gnn.state_dict(), os.path.join(args.checkpoint_dir, "gnn_phase1_final.pt"))
-    print(f"\n✅ Phase 1 훈련 완료!")
-    print(f"   최종 Blue 승률: {np.mean(win_rate_history[-100:]):.1%}")
+    logger.info("[Phase 1] 훈련 완료 | 최종 Blue 승률: %.1f%%",
+                np.mean(win_rate_history[-100:]) * 100)
 
 
 def train_phase2(args):
     """Phase 2: Self-Play 훈련"""
-    print("🔴 Phase 2: Self-Play (Blue vs Red) 훈련 시작")
+    logger.info("[Phase 2] Self-Play (Blue vs Red) 훈련 시작")
 
     from rl_agent.self_play_trainer import SelfPlayTrainer, SelfPlayConfig
 
@@ -224,17 +257,17 @@ def train_phase2(args):
     trainer = SelfPlayTrainer(config)
     final_stats = trainer.train()
 
-    print(f"\n📊 Phase 2 최종 통계:")
+    logger.info("[Phase 2] 최종 통계:")
     for k, v in final_stats.items():
         if isinstance(v, float):
-            print(f"   {k}: {v:.4f}")
+            logger.info("  %s: %.4f", k, v)
         else:
-            print(f"   {k}: {v}")
+            logger.info("  %s: %s", k, v)
 
 
 def train_phase3(args):
     """Phase 3: HITL 통합 루프"""
-    print("🟣 Phase 3: HITL 통합 훈련 시작")
+    logger.info("[Phase 3] HITL 통합 훈련 시작")
 
     from ontology.combat_schema import ScenarioFactory
     from hitl.pareto_generator import ParetoStrategyGenerator, CommanderConstraints
@@ -291,12 +324,11 @@ def train_phase3(args):
         )
 
         if ep % args.log_interval == 0 and ep > 0:
-            print(
-                f"  EP {ep:5d}/{args.episodes} | "
-                f"Adoption={learner.adoption_rate:.1%} | "
-                f"AI={ai_recommended.label:8s} | "
-                f"Selected={selected.label:8s} | "
-                f"WinP={selected.win_probability:.1%}"
+            logger.info(
+                "EP %5d/%d | Adoption=%.1f%% | AI=%-8s | Selected=%-8s | WinP=%.1f%%",
+                ep, args.episodes, learner.adoption_rate * 100,
+                ai_recommended.label, selected.label,
+                selected.win_probability * 100,
             )
 
     pref_path = os.path.join(args.checkpoint_dir, "hitl_phase3_preferences.json")
@@ -322,31 +354,51 @@ def train_phase3(args):
             "checkpoint_dir": args.checkpoint_dir
         }, f, indent=2)
 
-    print("\n✅ Phase 3 HITL 통합 완료!")
-    print(f"   AI 추천 채택률: {learner.adoption_rate:.1%}")
-    print(f"   선호도 저장: {pref_path}")
-    print(f"   메트릭 저장: {metrics_path}")
+    logger.info("[Phase 3] HITL 통합 완료 | AI 추천 채택률: %.1f%%", learner.adoption_rate * 100)
+    logger.info("  선호도 저장: %s | 메트릭 저장: %s", pref_path, metrics_path)
 
 
 def main():
     parser = argparse.ArgumentParser(description="AI Combat Optimization System Training")
     parser.add_argument("--phase", type=int, default=1, choices=[1, 2, 3],
                         help="학습 Phase (1: GNN+PPO, 2: Self-Play, 3: HITL preference learning loop)")
-    parser.add_argument("--episodes", type=int, default=500, help="에피소드 수")
-    parser.add_argument("--lr", type=float, default=3e-4, help="학습률")
-    parser.add_argument("--seed", type=int, default=42, help="랜덤 시드")
-    parser.add_argument("--mc-samples", type=int, default=10, help="MC Dropout 샘플 수")
-    parser.add_argument("--ppo-epochs", type=int, default=4, help="PPO 업데이트 에포크")
-    parser.add_argument("--log-interval", type=int, default=50, help="로깅 간격")
-    parser.add_argument("--save-interval", type=int, default=200, help="저장 간격")
-    parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="체크포인트 저장 경로")
+    parser.add_argument("--config", type=str, default=None,
+                        help="YAML 설정 파일 경로 (예: configs/phase1.yaml)")
+    parser.add_argument("--episodes", type=int, default=None, help="에피소드 수")
+    parser.add_argument("--lr", type=float, default=None, help="학습률")
+    parser.add_argument("--seed", type=int, default=None, help="랜덤 시드")
+    parser.add_argument("--mc-samples", type=int, default=None, help="MC Dropout 샘플 수")
+    parser.add_argument("--ppo-epochs", type=int, default=None, help="PPO 업데이트 에포크")
+    parser.add_argument("--log-interval", type=int, default=None, help="로깅 간격")
+    parser.add_argument("--save-interval", type=int, default=None, help="저장 간격")
+    parser.add_argument("--checkpoint-dir", type=str, default=None, help="체크포인트 저장 경로")
     parser.add_argument("--hitl", action="store_true", help="Phase 3 HITL 통합 루프 활성화")
 
     args = parser.parse_args()
 
-    print(f"\n🧠 AI Combat Optimization System v2.0")
-    print(f"   Phase {args.phase} | Episodes: {args.episodes} | Seed: {args.seed}")
-    print("─" * 50)
+    # YAML config 로드 후 CLI 미지정 값에 기본값 적용
+    cfg = load_config(args.config, args, section="training")
+    # argparse default를 None → config 값으로 채움
+    defaults = {
+        "episodes": 500, "lr": 3e-4, "seed": 42, "mc_samples": 10,
+        "ppo_epochs": 4, "log_interval": 50, "save_interval": 200,
+        "checkpoint_dir": "checkpoints",
+    }
+    for key, fallback in defaults.items():
+        if getattr(args, key, None) is None:
+            setattr(args, key, cfg.get(key, fallback))
+
+    # 고유 run_id 생성 (타임스탬프 기반)
+    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    args.run_id = run_id
+
+    setup_logger(args.checkpoint_dir, run_id)
+
+    logger.info("AI Combat Optimization System v2.0")
+    logger.info("run_id=%s | Phase=%d | Episodes=%d | Seed=%d",
+                run_id, args.phase, args.episodes, args.seed)
+    if args.config:
+        logger.info("Config file: %s", args.config)
 
     set_global_seed(args.seed)
 
@@ -356,7 +408,7 @@ def main():
         train_phase2(args)
     elif args.phase == 3:
         if not args.hitl:
-            print("⚠️  Phase 3는 --hitl 옵션과 함께 실행하는 것을 권장합니다.")
+            logger.warning("Phase 3는 --hitl 옵션과 함께 실행하는 것을 권장합니다.")
         train_phase3(args)
 
 
