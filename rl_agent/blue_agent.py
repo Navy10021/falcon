@@ -47,8 +47,9 @@ def build_state_vector(
     gnn_extension: Optional[np.ndarray] = None,
     temporal_features: Optional[np.ndarray] = None,
     uncertainty_map: Optional[Dict[str, float]] = None,
-    c2_quality: float = 1.0,          # 지휘통제 품질 [0,1]
-    joint_fires_available: float = 0.0 # 합동화력 가용 여부 [0,1]
+    c2_quality: float = 1.0,           # 지휘통제 품질 [0,1]
+    joint_fires_available: float = 0.0, # 합동화력 가용 여부 [0,1]
+    intel_manager=None,                 # IntelligenceManager (optional)
 ) -> np.ndarray:
     """
     PPO 상태 벡터 구성 (128차원)
@@ -60,8 +61,29 @@ def build_state_vector(
     + 지형 정보 (6D) + C2·합동화력 (4D)
     = 56D 기본  +  GNN 불확실성 (8D) + 시계열 트렌드 (8D)
     = 72D → 128D 패딩
+
+    intel_manager 제공 시:
+      - gnn_extension 자동 계산 (정보 온톨로지 8D 특성)
+      - uncertainty_map 자동 계산 (FogOfWar 불확실도)
     """
     from ontology.combat_schema import ForceAlignment, UnitStatus
+
+    # intel_manager 자동 연동 (정보 온톨로지)
+    if intel_manager is not None:
+        if gnn_extension is None:
+            try:
+                gnn_extension = intel_manager.get_gnn_state_features(
+                    ForceAlignment.BLUE, kg
+                )
+            except Exception:
+                pass
+        if uncertainty_map is None:
+            try:
+                uncertainty_map = intel_manager.get_uncertainty_map(
+                    ForceAlignment.BLUE, kg
+                )
+            except Exception:
+                pass
 
     blue_units = [u for u in kg.units.values() if u.alignment == ForceAlignment.BLUE]
     red_units  = [u for u in kg.units.values() if u.alignment == ForceAlignment.RED]
