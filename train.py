@@ -350,12 +350,22 @@ def train_phase2(args):
 
     from rl_agent.self_play_trainer import SelfPlayTrainer, SelfPlayConfig
 
+    # N-4: Phase 1에서 저장된 GNN 체크포인트를 Phase 2에 전달
+    #       → SelfPlayTrainer가 동일한 GNN으로 상태 벡터를 생성해 Phase 간 환경 일관성 확보
+    _gnn_ckpt = os.path.join(args.checkpoint_dir, "gnn_phase1_final.pt")
+    _gnn_ckpt_path = _gnn_ckpt if os.path.isfile(_gnn_ckpt) else None
+    if _gnn_ckpt_path:
+        logger.info("  [N-4] Phase 1 GNN 체크포인트 로드: %s", _gnn_ckpt_path)
+    else:
+        logger.warning("  [N-4] Phase 1 GNN 체크포인트 없음 (%s) → GNN 없이 Self-Play 진행", _gnn_ckpt)
+
     config = SelfPlayConfig(
         total_episodes=args.episodes,
         log_interval=args.log_interval,
         save_interval=args.save_interval,
         checkpoint_dir=args.checkpoint_dir,
-        nash_check_interval=max(50, args.episodes // 20)
+        nash_check_interval=max(50, args.episodes // 20),
+        gnn_checkpoint_path=_gnn_ckpt_path,   # N-4
     )
     trainer = SelfPlayTrainer(config)
     final_stats = trainer.train()
@@ -602,9 +612,16 @@ def train_phase4(args):
                                     * avg_unc * force_reduction * 0.05
                                     if avg_unc > 0.5 and force_reduction > 0 else 0.0)
 
-            # P3-4: IRL 보너스 (교리 기반 행동 강화)
-            irl_bonus = irl_loader.compute_irl_bonus(kg, step_result, maneuver_result) \
-                        if irl_loader is not None else 0.0
+            # P3-4 + N-3: IRL 보너스 — step_t/max_steps로 time_pressure 동적 계산
+            irl_bonus = irl_loader.compute_irl_bonus(
+                kg, step_result, maneuver_result,
+                step_t=step_t, max_steps=50,
+            ) if irl_loader is not None else 0.0
+
+            # N-5: survival_bonus 이중 스케일 방지 — raw 최대값으로 클리핑
+            # W_FORCE_RATIO(=2.0) × ratio_max(=1.0) = 2.0이 상한이므로 해당 값으로 cap
+            _SURVIVAL_BONUS_CAP = blue_agent._W_FORCE_RATIO
+            survival_bonus_clamped = min(survival_bonus_raw, _SURVIVAL_BONUS_CAP)
 
             # 선호도 스케일 적용 (IRL 보너스는 enemy_damage에 합산)
             reward = adapter.compute_scaled_reward(
@@ -612,7 +629,7 @@ def train_phase4(args):
                 win_reward=win_reward_raw,
                 force_reward=force_reward_raw,
                 casualty_penalty=casualty_penalty_raw,
-                survival_bonus=survival_bonus_raw,
+                survival_bonus=survival_bonus_clamped,   # N-5: clamped
                 enemy_damage=enemy_dmg_raw + irl_bonus,
                 doctrine_bonus=doctrine_bonus_raw,
                 uncertainty_penalty=unc_pen_raw,

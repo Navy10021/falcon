@@ -9,14 +9,17 @@ Phase 2: Blue vs Red Self-Play 학습 루프
 
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
+import math
 import numpy as np
 import os
 import copy
 from dataclasses import dataclass, field
 from tqdm import tqdm
+import torch
 
 from ontology.combat_schema import ScenarioFactory, ForceAlignment
 from simulator.lanchester_engine import LanchesterEngine
+from simulator.maneuver_engine import ManeuverEngine          # N-2: 공간 기동 엔진
 from simulator.fog_of_war import FogOfWarFilter, CurriculumScheduler
 from rl_agent.blue_agent import BlueAgent, build_state_vector, BlueActionSpace, PPOConfig
 from rl_agent.red_agent import RedAgent, RedActionSpace
@@ -35,6 +38,8 @@ class SelfPlayConfig:
     save_interval: int = 500
     checkpoint_dir: str = "checkpoints"
     timeout_result_mode: str = "headcount"   # headcount | draw
+    map_size: float = 30.0           # N-2: ManeuverEngine 맵 크기
+    gnn_checkpoint_path: Optional[str] = None   # N-4: Phase 1 GNN 체크포인트
 
     # Self-Play 단계
     phase_a_end: float = 0.2   # Phase A: Red 고정
@@ -73,6 +78,24 @@ class SelfPlayTrainer:
         self.engine = LanchesterEngine(seed=42)
         self.curriculum = CurriculumScheduler()
 
+        # N-2: ManeuverEngine — Phase 1과 동일한 공간 환경 제공
+        self.maneuver_engine = ManeuverEngine(
+            map_size=int(self.config.map_size), seed=42
+        )
+
+        # N-4: Phase 1 GNN 체크포인트 로드 (상태 벡터 품질 향상)
+        self.gnn = None
+        if (self.config.gnn_checkpoint_path
+                and os.path.isfile(self.config.gnn_checkpoint_path)):
+            from gnn_model.bayesian_hgt import BayesianHGT
+            self.gnn = BayesianHGT(
+                node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=10
+            )
+            self.gnn.load_state_dict(
+                torch.load(self.config.gnn_checkpoint_path, map_location="cpu")
+            )
+            self.gnn.eval()
+
         # 에이전트 초기화
         self.blue_agent = BlueAgent()
         self.red_agent  = RedAgent()
@@ -91,6 +114,71 @@ class SelfPlayTrainer:
         self.win_rates: Dict[str, List[float]] = {"blue": [], "red": [], "draw": []}
 
         os.makedirs(self.config.checkpoint_dir, exist_ok=True)
+
+    @staticmethod
+    def _build_blue_maneuver_targets(kg, blue_action: int, map_size: float = 30.0) -> Dict:
+        """
+        N-2: Blue 행동 유형 → ManeuverEngine 이동 목표 좌표 딕셔너리 생성.
+
+        train.py._build_blue_maneuver_targets()와 동일한 로직 적용.
+        Phase 1과 Phase 2의 공간 환경 일관성(distribution match)을 보장한다.
+        """
+        from ontology.combat_schema import UnitStatus
+
+        blue_units = [u for u in kg.units.values()
+                      if u.alignment == ForceAlignment.BLUE
+                      and u.status != UnitStatus.DESTROYED]
+        red_units  = [u for u in kg.units.values()
+                      if u.alignment == ForceAlignment.RED
+                      and u.status != UnitStatus.DESTROYED]
+        if not blue_units:
+            return {}
+
+        if red_units:
+            rcx = float(np.mean([u.position.x for u in red_units]))
+            rcy = float(np.mean([u.position.y for u in red_units]))
+        else:
+            rcx, rcy = map_size * 0.6, map_size * 0.5
+
+        bcx = float(np.mean([u.position.x for u in blue_units]))
+        bcy = float(np.mean([u.position.y for u in blue_units]))
+
+        targets = {}
+        action = int(blue_action)
+
+        for u in blue_units:
+            if action == BlueActionSpace.ADVANCE:
+                tx, ty = rcx, rcy
+            elif action == BlueActionSpace.FLANK:
+                if red_units:
+                    closest = min(red_units, key=lambda r: u.position.distance_to(r.position))
+                    dx = u.position.x - closest.position.x
+                    dy = u.position.y - closest.position.y
+                    norm = max(math.sqrt(dx**2 + dy**2), 0.1)
+                    tx = float(np.clip(closest.position.x + (-dy / norm) * 5.0, 0, map_size - 1))
+                    ty = float(np.clip(closest.position.y + ( dx / norm) * 5.0, 0, map_size - 1))
+                else:
+                    tx, ty = rcx, rcy
+            elif action == BlueActionSpace.WITHDRAW:
+                dx = bcx - rcx
+                dy = bcy - rcy
+                norm = max(math.sqrt(dx**2 + dy**2), 0.1)
+                tx = float(np.clip(u.position.x + (dx / norm) * 5.0, 0, map_size - 1))
+                ty = float(np.clip(u.position.y + (dy / norm) * 5.0, 0, map_size - 1))
+            elif action == BlueActionSpace.SUPPORT:
+                friendly = [f for f in blue_units if f.unit_id != u.unit_id]
+                if friendly:
+                    nearest = min(friendly, key=lambda f: u.position.distance_to(f.position))
+                    tx, ty = nearest.position.x, nearest.position.y
+                else:
+                    tx, ty = u.position.x, u.position.y
+            else:
+                tx = min(u.position.x + 1.0, map_size - 1)
+                ty = u.position.y
+
+            targets[u.unit_id] = (tx, ty)
+
+        return targets
 
     def _get_current_phase(self, progress: float) -> str:
         cfg = self.config
@@ -192,8 +280,28 @@ class SelfPlayTrainer:
 
             # Blue 관측
             blue_obs_kg, uncertainty_map = fog_filter.observe(kg, ForceAlignment.BLUE)
-            blue_state = build_state_vector(blue_obs_kg, uncertainty_map=uncertainty_map)
             avg_uncertainty = float(np.mean(list(uncertainty_map.values()))) if uncertainty_map else 0.0
+
+            # N-4: GNN 불확실성 확장 벡터 — Phase 1과 동일한 상태 공간 유지
+            gnn_ext = None
+            if self.gnn is not None:
+                from gnn_model.bayesian_hgt import prepare_graph_tensors
+                x, adj = prepare_graph_tensors(blue_obs_kg)
+                with torch.no_grad():
+                    gnn_out = self.gnn.predict_with_uncertainty(x, adj)
+                _ext = np.array([
+                    gnn_out["casualty_mean"].item(), gnn_out["casualty_std"].item(),
+                    gnn_out["risk_mean"].item(),      gnn_out["risk_std"].item(),
+                    gnn_out["epistemic_uncertainty"].item(),
+                    gnn_out["aleatoric_uncertainty"].item(),
+                ], dtype=np.float32)
+                gnn_ext = np.clip(
+                    np.nan_to_num(_ext, nan=0.0, posinf=10.0, neginf=-10.0), -10.0, 10.0
+                )
+
+            blue_state = build_state_vector(
+                blue_obs_kg, gnn_extension=gnn_ext, uncertainty_map=uncertainty_map
+            )
 
             # Red 관측 (반대 방향)
             red_obs_kg, _ = fog_filter.observe(kg, ForceAlignment.RED)
@@ -210,11 +318,22 @@ class SelfPlayTrainer:
             if red_action == RedActionSpace.DECEPTION:
                 red_agent.apply_deception(fog_filter)
 
+            # N-2: ManeuverEngine — Blue 행동 유형에 따라 유닛 위치 갱신
+            blue_maneuver_targets = self._build_blue_maneuver_targets(
+                kg, blue_action, self.config.map_size
+            )
+            self.maneuver_engine.run_maneuver_step(
+                kg, blue_targets=blue_maneuver_targets
+            )
+
             # 시뮬레이션 스텝 (행동 기반 교전 쌍 반영)
             action_pairs = self._build_action_pairs(kg, blue_action, red_action)
             step_result = self.engine.run_step(kg, action_pairs=action_pairs)
             blue_total_cas += step_result.blue_total_casualties
             red_total_cas  += step_result.red_total_casualties
+
+            # N-2: 교전 후 GNN 노드 특성 동기화
+            kg.update_node_features()
 
             done = (step_result.mission_status != "ongoing")
 

@@ -431,9 +431,23 @@ class IRLRewardLoader:
         )
         return cls(learned)
 
-    def _build_state_dict(self, kg, step_result, maneuver_result: Optional[Dict] = None) -> Dict:
+    def _build_state_dict(
+        self,
+        kg,
+        step_result,
+        maneuver_result: Optional[Dict] = None,
+        step_t: int = 0,
+        max_steps: int = 50,
+    ) -> Dict:
         """
         CombatKnowledgeGraph + BattleStep + ManeuverResult → 12차원 피처 딕셔너리 변환.
+
+        Parameters
+        ----------
+        step_t : int
+            현재 에피소드 스텝 번호 (0-based).
+        max_steps : int
+            에피소드 최대 스텝 수.
         """
         from ontology.combat_schema import ForceAlignment, UnitStatus
 
@@ -459,6 +473,10 @@ class IRLRewardLoader:
         flanking_cnt  = (maneuver_result or {}).get("flanking_units", 0)
         envelop_flag  = float((maneuver_result or {}).get("enveloping", False))
 
+        # N-3: time_pressure를 에피소드 진행도 기반으로 동적 계산
+        #       1.0(초반 긴박) → 0.0(후반 여유) 방향으로 단조 감소
+        time_pressure = float(1.0 - step_t / max(max_steps, 1))
+
         return {
             "blue_force_ratio":     blue_cp / total_cp,
             "casualty_efficiency":  red_cas  / max(blue_cas, 1),
@@ -469,21 +487,37 @@ class IRLRewardLoader:
             "maneuver_score":       float(np.clip(n_engageable * 0.1, 0, 1)),
             "ammo_level":           avg_ammo,
             "fuel_level":           avg_fuel,
-            "time_pressure":        0.5,   # 스텝 진행도 미연동 (근사치)
+            "time_pressure":        time_pressure,   # N-3: 동적 계산
             "flanking_bonus":       float(flanking_cnt > 0),
             "envelopment_bonus":    envelop_flag,
         }
 
-    def compute_irl_bonus(self, kg, step_result, maneuver_result: Optional[Dict] = None) -> float:
+    def compute_irl_bonus(
+        self,
+        kg,
+        step_result,
+        maneuver_result: Optional[Dict] = None,
+        step_t: int = 0,
+        max_steps: int = 50,
+    ) -> float:
         """
         현재 전투 상태에서 IRL 보상 보너스를 계산한다.
+
+        Parameters
+        ----------
+        step_t : int
+            현재 에피소드 스텝 번호. N-3: time_pressure 동적 계산에 사용.
+        max_steps : int
+            에피소드 최대 스텝 수.
 
         Returns
         -------
         float
             IRL 보너스 값 (PPO 보상에 더해짐). 양수 = 교리 준수 행동 강화.
         """
-        state_dict = self._build_state_dict(kg, step_result, maneuver_result)
+        state_dict = self._build_state_dict(
+            kg, step_result, maneuver_result, step_t=step_t, max_steps=max_steps
+        )
         feature_vec = extract_features(state_dict)
         raw_reward  = self.learned_reward.compute(feature_vec)
         return float(raw_reward * self._IRL_BONUS_SCALE)
