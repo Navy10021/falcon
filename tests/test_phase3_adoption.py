@@ -30,5 +30,10 @@ def main():
     print("✅ phase3 adoption semantics test passed")
 
 
+def test_phase3_adoption():
+    """pytest: CommanderPreferenceLearner 채택률 시맨틱스 검증."""
+    main()
+
+
 if __name__ == "__main__":
     main()

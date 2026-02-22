@@ -262,3 +262,13 @@ else:
         if not ok:
             print(f"   ❌ {name}: {detail}")
 print("="*55)
+
+
+# ── pytest entry point ────────────────────────────────────────
+def test_phase3_medium_all():
+    """pytest: Phase 3 중기 검증 (IRL/AAR/역사벤치마크)."""
+    failed = [(name, detail) for name, ok, detail in results if not ok]
+    assert not failed, (
+        "Phase 3 failures:\n"
+        + "\n".join(f"  \u274c {n}: {d}" for n, d in failed)
+    )

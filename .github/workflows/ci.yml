@@ -1,0 +1,133 @@
+name: FALCON CI
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # Job 1: Fast smoke tests (numerical stability + adoption)
+  # ──────────────────────────────────────────────────────────
+  smoke:
+    name: Smoke Tests (fast)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install core dependencies
+        run: |
+          pip install --upgrade pip
+          # CPU-only torch (smaller download, sufficient for tests)
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy scipy networkx
+          pip install matplotlib seaborn plotly pandas scikit-learn
+          pip install pyyaml tqdm rich
+          pip install gymnasium
+          pip install stable-baselines3 --no-deps
+          pip install pytest>=7.4.0
+
+      - name: Run smoke tests
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest tests/test_numerical_stability.py \
+                 tests/test_phase3_adoption.py \
+                 -v --tb=short
+
+  # ──────────────────────────────────────────────────────────
+  # Job 2: Full test suite
+  # ──────────────────────────────────────────────────────────
+  full:
+    name: Full Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Run full suite only on pushes to main or when smoke passes
+    needs: smoke
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install all dependencies
+        run: |
+          pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy scipy networkx
+          pip install matplotlib seaborn plotly pandas scikit-learn
+          pip install pyyaml tqdm rich
+          pip install gymnasium
+          pip install stable-baselines3 --no-deps
+          # torch-geometric: optional, skip if install fails
+          pip install torch-geometric || echo "torch-geometric not available, skipping"
+          pip install pytest>=7.4.0 pytest-timeout
+
+      - name: Run full test suite
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest tests/ \
+            --ignore=tests/test_cli_contract.py \
+            -v --tb=short \
+            --timeout=180
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            .pytest_cache/
+          retention-days: 7
+
+  # ──────────────────────────────────────────────────────────
+  # Job 3: CLI contract (requires working train.py / evaluate.py)
+  # ──────────────────────────────────────────────────────────
+  cli-contract:
+    name: CLI Contract Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: smoke
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install all dependencies
+        run: |
+          pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy scipy networkx
+          pip install matplotlib seaborn plotly pandas scikit-learn
+          pip install pyyaml tqdm rich
+          pip install gymnasium
+          pip install stable-baselines3 --no-deps
+          pip install pytest>=7.4.0
+
+      - name: Run CLI contract tests
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest tests/test_cli_contract.py -v --tb=short

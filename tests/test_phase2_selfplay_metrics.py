@@ -16,5 +16,10 @@ def main():
     print("✅ phase2 selfplay metrics test passed")
 
 
+def test_phase2_selfplay_metrics():
+    """pytest: SelfPlayTrainer 지표 검증 (draw_rate/win_rate/resolved_ratio)."""
+    main()
+
+
 if __name__ == "__main__":
     main()
