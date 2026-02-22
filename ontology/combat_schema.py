@@ -335,6 +335,18 @@ class CombatKnowledgeGraph:
             "red_combat_power": sum(u.combat_power for u in red_units),
         }
 
+    def update_node_features(self) -> None:
+        """
+        P3-2: 시뮬레이션 스텝 이후 변경된 유닛 상태를 그래프 노드 features에 동기화.
+
+        headcount, status, morale, experience, combat_power 등 동적으로 변하는
+        속성이 GNN 입력에 실시간 반영되도록 한다.
+        (TerrainCell은 정적이므로 유닛 노드만 갱신)
+        """
+        for unit_id, unit in self.units.items():
+            if unit_id in self.graph.nodes:
+                self.graph.nodes[unit_id]["features"] = unit.to_feature_vector()
+
 
 # ──────────────────────────────────────────────
 # Scenario Factory

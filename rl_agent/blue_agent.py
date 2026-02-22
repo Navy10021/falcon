@@ -270,6 +270,7 @@ class BlueAgent:
     _W_FORCE_SAVE   =   0.15  # 스텝별 병력 절감 보상 (이전 0.01 → 0.15, 15× 상향)
     _W_FORCE_RATIO  =   2.0   # 임무 종료 시 잔존 병력 비율 보너스 스케일
     _W_ENEMY_DMG    =   0.03  # 적 사상자 보상 (이전 0.02 → 0.03)
+    _W_DOCTRINE     =   1.0   # P3-5: 교리 준수 보너스 스케일
     # ────────────────────────────────────────────────────────────────────
 
     def compute_reward(
@@ -280,15 +281,17 @@ class BlueAgent:
         uncertainty: float = 0.0,
         config: Optional[PPOConfig] = None,
         initial_force_size: int = 0,    # 에피소드 시작 병력 (종료 보너스 계산용)
+        doctrine_score: float = 0.0,    # P3-5: DoctrineCompliance.total_score [0,1]
     ) -> float:
         """
-        보상 함수 (P2-6 보상 스케일 재조정):
+        보상 함수 (P2-6 보상 스케일 재조정, P3-5 교리 준수도 추가):
 
           R = w_win × WinSignal
             - w_cas  × BlueCasualties
             + w_save × ForceReduction        ← 핵심: 15× 상향
             + w_ratio× SurvivalRatioBonus    ← 임무 종료 시 잔존 비율 보너스
             + w_edm  × RedCasualties
+            + w_doc  × DoctrineScore         ← P3-5: 교리 준수 보너스 [-0.5, +0.5]
             - UncertaintyPenalty
         """
         cfg = config or self.config
@@ -318,7 +321,10 @@ class BlueAgent:
         # 5. 적 사상자 보상
         enemy_damage = step_result.red_total_casualties * self._W_ENEMY_DMG
 
-        # 6. 불확실성 패널티 (불확실한 상황에서 과감한 병력 운용 시 패널티)
+        # 6. P3-5: 교리 준수 보너스 (score=0.5 → 중립, >0.5 보너스, <0.5 패널티)
+        doctrine_bonus = self._W_DOCTRINE * (doctrine_score - 0.5)
+
+        # 7. 불확실성 패널티 (불확실한 상황에서 과감한 병력 운용 시 패널티)
         uncertainty_penalty = 0.0
         if uncertainty > 0.5 and force_reduction > 0:
             uncertainty_penalty = (cfg.uncertainty_penalty_coef
@@ -329,6 +335,7 @@ class BlueAgent:
                   + force_reward
                   + survival_bonus
                   + enemy_damage
+                  + doctrine_bonus
                   - uncertainty_penalty)
 
         return float(reward)

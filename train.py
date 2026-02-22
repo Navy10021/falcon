@@ -9,6 +9,7 @@ import argparse
 import datetime
 import json
 import logging
+import math
 import os
 import sys
 import numpy as np
@@ -91,6 +92,85 @@ def _build_blue_action_pairs(kg, blue_action, ForceAlignment, UnitStatus, BlueAc
             for i, att in enumerate(attackers)]
 
 
+def _build_blue_maneuver_targets(kg, blue_action, ForceAlignment, UnitStatus, BlueActionSpace,
+                                  map_size: float = 30.0):
+    """
+    P3-1: Blue 행동 유형 → ManeuverEngine 이동 목표 좌표 딕셔너리 생성.
+    각 Blue 유닛에 대해 {unit_id: (tx, ty)} 를 반환한다.
+
+    행동 매핑:
+      ADVANCE (1)   → 적 중심 방향으로 전진
+      FLANK   (5)   → 가장 가까운 적의 측면 좌표로 기동
+      WITHDRAW(2)   → 자군 후방(맵 좌측)으로 후퇴
+      REINFORCE(0)  → 현재 위치 유지 (소폭 전진)
+      SUPPORT (4)   → 가장 가까운 아군 근처로 이동
+      REALLOCATE(3) → 현재 위치 유지
+    """
+    blue_units = [u for u in kg.units.values()
+                  if u.alignment == ForceAlignment.BLUE
+                  and u.status != UnitStatus.DESTROYED]
+    red_units  = [u for u in kg.units.values()
+                  if u.alignment == ForceAlignment.RED
+                  and u.status != UnitStatus.DESTROYED]
+
+    if not blue_units:
+        return {}
+
+    # 적 중심 계산
+    if red_units:
+        rcx = float(np.mean([u.position.x for u in red_units]))
+        rcy = float(np.mean([u.position.y for u in red_units]))
+    else:
+        rcx, rcy = map_size * 0.6, map_size * 0.5
+
+    # 아군 중심 계산
+    bcx = float(np.mean([u.position.x for u in blue_units]))
+    bcy = float(np.mean([u.position.y for u in blue_units]))
+
+    targets = {}
+    action = int(blue_action)
+
+    for u in blue_units:
+        if action == BlueActionSpace.ADVANCE:
+            # 적 중심 방향으로 전진
+            tx, ty = rcx, rcy
+        elif action == BlueActionSpace.FLANK:
+            # 가장 가까운 적의 90도 측면 좌표
+            if red_units:
+                closest_red = min(red_units, key=lambda r: u.position.distance_to(r.position))
+                # 적→유닛 벡터 90도 회전
+                dx = u.position.x - closest_red.position.x
+                dy = u.position.y - closest_red.position.y
+                norm = max(math.sqrt(dx**2 + dy**2), 0.1)
+                tx = float(np.clip(closest_red.position.x + (-dy / norm) * 5.0, 0, map_size - 1))
+                ty = float(np.clip(closest_red.position.y + ( dx / norm) * 5.0, 0, map_size - 1))
+            else:
+                tx, ty = rcx, rcy
+        elif action == BlueActionSpace.WITHDRAW:
+            # 자군 후방(현재 위치에서 적 반대 방향)으로 이동
+            dx = bcx - rcx
+            dy = bcy - rcy
+            norm = max(math.sqrt(dx**2 + dy**2), 0.1)
+            tx = float(np.clip(u.position.x + (dx / norm) * 5.0, 0, map_size - 1))
+            ty = float(np.clip(u.position.y + (dy / norm) * 5.0, 0, map_size - 1))
+        elif action == BlueActionSpace.SUPPORT:
+            # 가장 가까운 아군 근처로 이동
+            friendly = [f for f in blue_units if f.unit_id != u.unit_id]
+            if friendly:
+                nearest = min(friendly, key=lambda f: u.position.distance_to(f.position))
+                tx, ty = nearest.position.x, nearest.position.y
+            else:
+                tx, ty = u.position.x, u.position.y
+        else:
+            # REINFORCE / REALLOCATE: 소폭 전진 유지
+            tx = min(u.position.x + 1.0, map_size - 1)
+            ty = u.position.y
+
+        targets[u.unit_id] = (tx, ty)
+
+    return targets
+
+
 def train_phase1(args):
     """Phase 1: Uncertainty-Aware GNN + Blue PPO 훈련"""
     logger.info("[Phase 1] Uncertainty-Aware GNN + PPO 훈련 시작")
@@ -98,10 +178,13 @@ def train_phase1(args):
     from ontology.combat_schema import ScenarioFactory, ForceAlignment, UnitStatus
     from simulator.lanchester_engine import LanchesterEngine
     from simulator.fog_of_war import FogOfWarFilter, CurriculumScheduler
+    from simulator.maneuver_engine import ManeuverEngine  # P3-1
     from gnn_model.bayesian_hgt import BayesianHGT, prepare_graph_tensors, CombatGNNLoss
     from rl_agent.blue_agent import BlueAgent, build_state_vector, BlueActionSpace, PPOConfig
+    from ontology.doctrine_encoder import DoctrineEncoder  # P3-5
 
     engine = LanchesterEngine(seed=args.seed)
+    maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)  # P3-1
     curriculum = CurriculumScheduler()
     gnn = BayesianHGT(node_in_dim=32, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim = torch.optim.Adam(gnn.parameters(), lr=1e-3)
@@ -109,6 +192,7 @@ def train_phase1(args):
 
     ppo_config = PPOConfig(lr=args.lr, n_epochs=args.ppo_epochs)
     blue_agent = BlueAgent(config=ppo_config)
+    doctrine_encoder = DoctrineEncoder()  # P3-5: 에피소드 간 공유 히스토리 추적
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
@@ -171,16 +255,35 @@ def train_phase1(args):
 
             action, log_prob, value = blue_agent.select_action(state)
 
+            # P3-1: 행동 유형별 이동 목표 계산 후 ManeuverEngine 실행 (유닛 위치 갱신)
+            blue_targets = _build_blue_maneuver_targets(
+                kg, action, ForceAlignment, UnitStatus, BlueActionSpace
+            )
+            maneuver_result = maneuver_engine.run_maneuver_step(kg, blue_targets=blue_targets)
+
             # P1-3: 에이전트 행동을 시뮬레이션에 반영 (타겟 우선순위 결정)
             action_pairs = _build_blue_action_pairs(kg, action, ForceAlignment, UnitStatus, BlueActionSpace)
             step_result = engine.run_step(kg, action_pairs=action_pairs)
             done = (step_result.mission_status != "ongoing")
 
-            # P1-1: prev_blue_hc 기반 스텝별 보상 계산 (P2-6: initial_force_size 전달)
+            # P3-2: GNN 노드 특성 동기화 (변경된 유닛 상태 → 그래프 반영)
+            kg.update_node_features()
+
+            # P3-5: 교리 준수도 평가 (기동 정보 포함)
+            step_dict = {
+                "blue_casualties": step_result.blue_total_casualties,
+                "red_casualties":  step_result.red_total_casualties,
+                "n_engageable":    maneuver_result.get("n_engageable", 0),
+                "flanking_units":  maneuver_result.get("flanking_units", 0),
+            }
+            compliance = doctrine_encoder.evaluate(kg, step_t, step_dict)
+
+            # P1-1: prev_blue_hc 기반 스텝별 보상 계산 (P2-6: initial_force_size, P3-5: doctrine_score)
             reward = blue_agent.compute_reward(
                 step_result, prev_blue_hc,
                 step_result.blue_total_headcount, avg_unc,
                 initial_force_size=initial_blue_hc,
+                doctrine_score=compliance.total_score,
             )
             prev_blue_hc = step_result.blue_total_headcount
             episode_reward += reward
@@ -358,10 +461,194 @@ def train_phase3(args):
     logger.info("  선호도 저장: %s | 메트릭 저장: %s", pref_path, metrics_path)
 
 
+def train_phase4(args):
+    """
+    Phase 4: P3-3 HITL 선호도 → RL 정책 재학습.
+
+    Phase 3에서 학습된 지휘관 선호도(preference_weights)를
+    PPO 보상 함수에 반영해 Blue 에이전트를 fine-tuning 한다.
+
+    주요 흐름:
+        1. Phase 1/2 체크포인트 로드
+        2. HITL 선호도 파일 로드 → PreferenceRewardAdapter 생성
+        3. 선호도 스케일이 반영된 보상으로 Phase 1 루프 재실행
+    """
+    logger.info("[Phase 4] HITL 선호도 반영 재학습 시작")
+    logger.info("  preference_model: %s", args.preference_model)
+    logger.info("  blue_checkpoint : %s", args.blue_checkpoint or "(없음 — 랜덤 초기화)")
+
+    from ontology.combat_schema import ScenarioFactory, ForceAlignment, UnitStatus
+    from simulator.lanchester_engine import LanchesterEngine
+    from simulator.fog_of_war import FogOfWarFilter, CurriculumScheduler
+    from simulator.maneuver_engine import ManeuverEngine
+    from gnn_model.bayesian_hgt import BayesianHGT, prepare_graph_tensors, CombatGNNLoss
+    from rl_agent.blue_agent import BlueAgent, build_state_vector, BlueActionSpace, PPOConfig
+    from ontology.doctrine_encoder import DoctrineEncoder
+    from hitl.preference_reward_adapter import PreferenceRewardAdapter
+    from rl_agent.inverse_rl import IRLRewardLoader  # P3-4
+
+    # 선호도 어댑터 로드
+    if args.preference_model and os.path.isfile(args.preference_model):
+        adapter = PreferenceRewardAdapter.from_file(args.preference_model)
+    else:
+        logger.warning("preference_model 파일 없음 → 균등 선호도(기본값) 사용")
+        adapter = PreferenceRewardAdapter.uniform()
+    logger.info("  %s", adapter.summary())
+
+    # IRL 보상 로더 (data/irl_demos_summary.json)
+    _irl_path = os.path.join(os.path.dirname(__file__), "data", "irl_demos_summary.json")
+    try:
+        irl_loader = IRLRewardLoader.from_file(_irl_path)
+        logger.info("  IRL 보상 가중치 로드 완료: %s", _irl_path)
+    except FileNotFoundError:
+        irl_loader = None
+        logger.warning("  IRL 데이터 파일 없음 (%s) → IRL 보너스 비활성화", _irl_path)
+
+    engine          = LanchesterEngine(seed=args.seed)
+    maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)
+    curriculum      = CurriculumScheduler()
+    gnn             = BayesianHGT(node_in_dim=32, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
+    gnn_optim       = torch.optim.Adam(gnn.parameters(), lr=1e-3)
+    gnn_loss_fn     = CombatGNNLoss()
+    ppo_config      = PPOConfig(lr=args.lr, n_epochs=args.ppo_epochs)
+    blue_agent      = BlueAgent(config=ppo_config)
+    doctrine_encoder = DoctrineEncoder()
+
+    # 체크포인트 로드
+    if args.blue_checkpoint and os.path.isfile(args.blue_checkpoint):
+        blue_agent.load(args.blue_checkpoint)
+        logger.info("  Blue 에이전트 체크포인트 로드: %s", args.blue_checkpoint)
+
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
+    rewards_history   = []
+    win_rate_history  = []
+
+    logger.info("  총 에피소드: %d | Fog 커리큘럼: Enabled", args.episodes)
+
+    for ep in range(args.episodes):
+        progress = ep / args.episodes
+        fog_level, _ = curriculum.update(progress)
+        fog_filter   = FogOfWarFilter(fog_level, seed=ep)
+
+        kg = ScenarioFactory.create_standard_scenario(
+            n_blue=np.random.randint(5, 12),
+            n_red=np.random.randint(4, 9),
+            seed=args.seed + ep,
+        )
+        initial_blue_hc = sum(u.headcount for u in kg.units.values()
+                              if u.alignment == ForceAlignment.BLUE)
+        prev_blue_hc    = initial_blue_hc
+        episode_reward  = 0.0
+        done            = False
+        step_result     = None
+
+        for step_t in range(50):
+            if done:
+                break
+
+            obs_kg, uncertainty_map = fog_filter.observe(kg, ForceAlignment.BLUE)
+            x, adj = prepare_graph_tensors(obs_kg)
+            with torch.no_grad():
+                gnn_out = gnn.predict_with_uncertainty(x, adj)
+            gnn_ext = np.array([
+                gnn_out["casualty_mean"].item(), gnn_out["casualty_std"].item(),
+                gnn_out["risk_mean"].item(),      gnn_out["risk_std"].item(),
+                gnn_out["epistemic_uncertainty"].item(),
+                gnn_out["aleatoric_uncertainty"].item(),
+            ], dtype=np.float32)
+            gnn_ext = np.clip(np.nan_to_num(gnn_ext, nan=0.0, posinf=10.0, neginf=-10.0), -10.0, 10.0)
+
+            state = build_state_vector(obs_kg, gnn_extension=gnn_ext,
+                                       uncertainty_map=uncertainty_map)
+            avg_unc = float(np.mean(list(uncertainty_map.values()))) if uncertainty_map else 0.0
+            action, log_prob, value = blue_agent.select_action(state)
+
+            # ManeuverEngine: 위치 갱신
+            blue_targets    = _build_blue_maneuver_targets(
+                kg, action, ForceAlignment, UnitStatus, BlueActionSpace)
+            maneuver_result = maneuver_engine.run_maneuver_step(kg, blue_targets=blue_targets)
+
+            # LanchesterEngine: 교전
+            action_pairs = _build_blue_action_pairs(
+                kg, action, ForceAlignment, UnitStatus, BlueActionSpace)
+            step_result = engine.run_step(kg, action_pairs=action_pairs)
+            done = (step_result.mission_status != "ongoing")
+
+            kg.update_node_features()
+
+            # 교리 평가
+            step_dict = {
+                "blue_casualties": step_result.blue_total_casualties,
+                "red_casualties":  step_result.red_total_casualties,
+                "n_engageable":    maneuver_result.get("n_engageable", 0),
+                "flanking_units":  maneuver_result.get("flanking_units", 0),
+            }
+            compliance = doctrine_encoder.evaluate(kg, step_t, step_dict)
+
+            # 기본 보상 항목 계산
+            terminal         = step_result.mission_status != "ongoing"
+            force_reduction  = prev_blue_hc - step_result.blue_total_headcount
+            win_reward_raw   = (blue_agent._W_WIN if step_result.mission_status == "blue_win"
+                                else -blue_agent._W_WIN if step_result.mission_status == "red_win"
+                                else 0.0)
+            casualty_penalty_raw = step_result.blue_total_casualties * blue_agent._W_CASUALTY
+            force_reward_raw     = blue_agent._W_FORCE_SAVE * force_reduction if force_reduction > 0 else 0.0
+            survival_bonus_raw   = (blue_agent._W_FORCE_RATIO
+                                    * step_result.blue_total_headcount / max(initial_blue_hc, 1)
+                                    if terminal and initial_blue_hc > 0 else 0.0)
+            enemy_dmg_raw        = step_result.red_total_casualties * blue_agent._W_ENEMY_DMG
+            doctrine_bonus_raw   = blue_agent._W_DOCTRINE * (compliance.total_score - 0.5)
+            unc_pen_raw          = (blue_agent.config.uncertainty_penalty_coef
+                                    * avg_unc * force_reduction * 0.05
+                                    if avg_unc > 0.5 and force_reduction > 0 else 0.0)
+
+            # P3-4: IRL 보너스 (교리 기반 행동 강화)
+            irl_bonus = irl_loader.compute_irl_bonus(kg, step_result, maneuver_result) \
+                        if irl_loader is not None else 0.0
+
+            # 선호도 스케일 적용 (IRL 보너스는 enemy_damage에 합산)
+            reward = adapter.compute_scaled_reward(
+                base_reward=0.0,
+                win_reward=win_reward_raw,
+                force_reward=force_reward_raw,
+                casualty_penalty=casualty_penalty_raw,
+                survival_bonus=survival_bonus_raw,
+                enemy_damage=enemy_dmg_raw + irl_bonus,
+                doctrine_bonus=doctrine_bonus_raw,
+                uncertainty_penalty=unc_pen_raw,
+            )
+            prev_blue_hc    = step_result.blue_total_headcount
+            episode_reward += reward
+            blue_agent.buffer.add(state, action, reward, log_prob, value, done, avg_unc)
+
+        blue_agent.update()
+        rewards_history.append(episode_reward)
+        win_rate_history.append(
+            1 if step_result is not None and "blue_win" in str(step_result.mission_status) else 0)
+
+        if ep % args.log_interval == 0 and ep > 0:
+            recent_wr = np.mean(win_rate_history[-50:]) if len(win_rate_history) >= 50 else np.mean(win_rate_history)
+            recent_r  = np.mean(rewards_history[-50:])  if len(rewards_history) >= 50  else np.mean(rewards_history)
+            logger.info("EP %5d/%d | WR=%.1f%% | R=%.2f", ep, args.episodes, recent_wr * 100, recent_r)
+
+        if ep > 0 and ep % args.save_interval == 0:
+            ckpt = os.path.join(args.checkpoint_dir, f"blue_phase4_ep{ep}.pt")
+            blue_agent.save(ckpt)
+            logger.info("체크포인트 저장: %s", ckpt)
+
+    blue_agent.save(os.path.join(args.checkpoint_dir, "blue_phase4_final.pt"))
+    logger.info("[Phase 4] 재학습 완료 | 최종 Blue 승률: %.1f%%",
+                np.mean(win_rate_history[-100:]) * 100)
+
+
 def main():
     parser = argparse.ArgumentParser(description="AI Combat Optimization System Training")
-    parser.add_argument("--phase", type=int, default=1, choices=[1, 2, 3],
-                        help="학습 Phase (1: GNN+PPO, 2: Self-Play, 3: HITL preference learning loop)")
+    parser.add_argument("--phase", type=int, default=1, choices=[1, 2, 3, 4],
+                        help="학습 Phase (1: GNN+PPO, 2: Self-Play, 3: HITL, 4: 선호도 반영 재학습)")
+    parser.add_argument("--preference-model", type=str, default=None,
+                        help="Phase 4: HITL 선호도 JSON 파일 경로")
+    parser.add_argument("--blue-checkpoint", type=str, default=None,
+                        help="Phase 4: Blue 에이전트 초기 체크포인트")
     parser.add_argument("--config", type=str, default=None,
                         help="YAML 설정 파일 경로 (예: configs/phase1.yaml)")
     parser.add_argument("--episodes", type=int, default=None, help="에피소드 수")
@@ -410,6 +697,10 @@ def main():
         if not args.hitl:
             logger.warning("Phase 3는 --hitl 옵션과 함께 실행하는 것을 권장합니다.")
         train_phase3(args)
+    elif args.phase == 4:
+        if not args.preference_model:
+            logger.warning("--preference-model 미지정 → 균등 선호도로 재학습합니다.")
+        train_phase4(args)
 
 
 if __name__ == "__main__":
