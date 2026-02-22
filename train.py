@@ -17,15 +17,57 @@ sys.path.insert(0, os.path.dirname(__file__))
 from utils.reproducibility import set_global_seed
 
 
+def _build_blue_action_pairs(kg, blue_action, ForceAlignment, UnitStatus, BlueActionSpace):
+    """
+    Blue 에이전트의 선택 행동을 시뮬레이션 교전 쌍에 반영.
+    행동 유형에 따라 공격 대상 우선순위(약한/강한/균형)를 결정한다.
+    """
+    blue_units = [u for u in kg.units.values()
+                  if u.alignment == ForceAlignment.BLUE
+                  and u.status != UnitStatus.DESTROYED
+                  and u.headcount > 0]
+    red_units = [u for u in kg.units.values()
+                 if u.alignment == ForceAlignment.RED
+                 and u.status != UnitStatus.DESTROYED
+                 and u.headcount > 0]
+    if not blue_units or not red_units:
+        return None
+
+    def pick_targets(units, mode):
+        if mode == "weakest":
+            return sorted(units, key=lambda u: u.headcount)
+        if mode == "strongest":
+            return sorted(units, key=lambda u: u.combat_power, reverse=True)
+        return sorted(units, key=lambda u: u.headcount, reverse=True)
+
+    mode_map = {
+        BlueActionSpace.ADVANCE:    "weakest",
+        BlueActionSpace.FLANK:      "weakest",
+        BlueActionSpace.REINFORCE:  "strongest",
+        BlueActionSpace.SUPPORT:    "strongest",
+        BlueActionSpace.REALLOCATE: "balanced",
+        BlueActionSpace.WITHDRAW:   "balanced",
+    }
+    blue_mode = mode_map.get(int(blue_action), "balanced")
+    targets = pick_targets(red_units, blue_mode)
+
+    attackers = blue_units
+    if int(blue_action) == BlueActionSpace.WITHDRAW:
+        attackers = blue_units[:max(1, len(blue_units) // 2)]
+
+    return [(att.unit_id, targets[i % len(targets)].unit_id)
+            for i, att in enumerate(attackers)]
+
+
 def train_phase1(args):
     """Phase 1: Uncertainty-Aware GNN + Blue PPO 훈련"""
     print("🔵 Phase 1: Uncertainty-Aware GNN + PPO 훈련 시작")
 
-    from ontology.combat_schema import ScenarioFactory, ForceAlignment
+    from ontology.combat_schema import ScenarioFactory, ForceAlignment, UnitStatus
     from simulator.lanchester_engine import LanchesterEngine
     from simulator.fog_of_war import FogOfWarFilter, CurriculumScheduler
     from gnn_model.bayesian_hgt import BayesianHGT, prepare_graph_tensors, CombatGNNLoss
-    from rl_agent.blue_agent import BlueAgent, build_state_vector, PPOConfig
+    from rl_agent.blue_agent import BlueAgent, build_state_vector, BlueActionSpace, PPOConfig
 
     engine = LanchesterEngine(seed=args.seed)
     curriculum = CurriculumScheduler()
@@ -61,9 +103,13 @@ def train_phase1(args):
 
         episode_reward = 0
         done = False
+        step_result = None
 
         # GNN 훈련 데이터 수집
-        gnn_batch_x, gnn_batch_adj, gnn_batch_target = [], [], []
+        gnn_batch_x, gnn_batch_adj, gnn_batch_targets = [], [], []
+
+        # P1-1: 스텝별 병력 추적 (직전 스텝 대비 절감 보상)
+        prev_blue_hc = initial_blue_hc
 
         for step_t in range(50):
             if done:
@@ -94,23 +140,31 @@ def train_phase1(args):
 
             action, log_prob, value = blue_agent.select_action(state)
 
-            # 환경 스텝
-            step_result = engine.run_step(kg)
+            # P1-3: 에이전트 행동을 시뮬레이션에 반영 (타겟 우선순위 결정)
+            action_pairs = _build_blue_action_pairs(kg, action, ForceAlignment, UnitStatus, BlueActionSpace)
+            step_result = engine.run_step(kg, action_pairs=action_pairs)
             done = (step_result.mission_status != "ongoing")
 
+            # P1-1: prev_blue_hc 기반 스텝별 보상 계산
             reward = blue_agent.compute_reward(
-                step_result, initial_blue_hc,
+                step_result, prev_blue_hc,
                 step_result.blue_total_headcount, avg_unc
             )
+            prev_blue_hc = step_result.blue_total_headcount
             episode_reward += reward
 
             blue_agent.buffer.add(state, action, reward, log_prob, value, done, avg_unc)
 
-            # GNN 학습 데이터
+            # GNN 학습 데이터 (P1-2: risk_score 동적 계산)
             gnn_batch_x.append(x)
             gnn_batch_adj.append(adj)
-            target_cas = torch.tensor(float(step_result.blue_total_casualties), dtype=torch.float32)
-            gnn_batch_target.append(target_cas)
+            blue_cas = float(step_result.blue_total_casualties)
+            red_cas = float(step_result.red_total_casualties)
+            risk_score = blue_cas / (blue_cas + red_cas + 1.0)  # [0, 1]
+            gnn_batch_targets.append({
+                "blue_casualties": torch.tensor(blue_cas, dtype=torch.float32),
+                "risk_score":      torch.tensor(risk_score, dtype=torch.float32),
+            })
 
         # PPO 업데이트
         ppo_metrics = blue_agent.update()
@@ -119,18 +173,18 @@ def train_phase1(args):
         if gnn_batch_x:
             gnn.train()
             total_gnn_loss = 0
-            for bx, ba, bt in zip(gnn_batch_x[:5], gnn_batch_adj[:5], gnn_batch_target[:5]):
+            for bx, ba, bt in zip(gnn_batch_x[:5], gnn_batch_adj[:5], gnn_batch_targets[:5]):
                 gnn_optim.zero_grad()
                 out = gnn(bx, ba)
-                targets = {"blue_casualties": bt, "risk_score": torch.tensor(0.5)}
-                loss = gnn_loss_fn(out, targets)
+                loss = gnn_loss_fn(out, bt)
                 loss.backward()
                 gnn_optim.step()
                 total_gnn_loss += loss.item()
             gnn_losses.append(total_gnn_loss / min(5, len(gnn_batch_x)))
+            gnn.eval()
 
         rewards_history.append(episode_reward)
-        win_rate_history.append(1 if 'blue_win' in str(step_result.mission_status) else 0)
+        win_rate_history.append(1 if step_result is not None and 'blue_win' in str(step_result.mission_status) else 0)
 
         # 로깅
         if ep % args.log_interval == 0 and ep > 0:

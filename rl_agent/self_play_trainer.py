@@ -184,6 +184,7 @@ class SelfPlayTrainer:
         blue_total_cas = 0
         red_total_cas  = 0
         done = False
+        step_result = None
 
         for step_t in range(cfg.max_steps_per_episode):
             if done:
@@ -247,7 +248,7 @@ class SelfPlayTrainer:
                             if u.alignment == ForceAlignment.BLUE)
         force_reduction = (initial_blue_hc - final_blue_hc) / max(initial_blue_hc, 1)
 
-        winner = step_result.mission_status if 'step_result' in dir() else "draw"
+        winner = step_result.mission_status if step_result is not None else "draw"
         if winner == "ongoing" and cfg.timeout_result_mode == "headcount":
             blue_hc = final_blue_hc
             red_hc = sum(u.headcount for u in kg.units.values() if u.alignment == ForceAlignment.RED)

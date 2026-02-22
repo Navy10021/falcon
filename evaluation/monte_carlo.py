@@ -88,6 +88,7 @@ class MonteCarloEvaluator:
                                   if u.alignment == ForceAlignment.BLUE)
 
             blue_casualties = 0
+            red_casualties = 0
             winner = "draw"
             n_steps = 0
 
@@ -102,6 +103,7 @@ class MonteCarloEvaluator:
 
                 step = engine.run_step(kg)
                 blue_casualties += step.blue_total_casualties
+                red_casualties += step.red_total_casualties
                 n_steps += 1
 
                 if step.mission_status != "ongoing":
@@ -116,8 +118,7 @@ class MonteCarloEvaluator:
                 run_id=run_id,
                 winner=winner,
                 blue_casualties=blue_casualties,
-                red_casualties=sum(u.headcount for u in kg.units.values()
-                                   if u.alignment != ForceAlignment.BLUE) * 0,  # placeholder
+                red_casualties=red_casualties,
                 n_steps=n_steps,
                 force_reduction_ratio=force_reduction,
                 initial_conditions={"n_blue": n_blue, "n_red": n_red}
@@ -154,7 +155,9 @@ class MonteCarloEvaluator:
             failure_scenarios.append({
                 "run_id": f.run_id,
                 "initial_conditions": f.initial_conditions,
-                "casualties": f.blue_casualties,
+                "blue_casualties": f.blue_casualties,
+                "red_casualties": f.red_casualties,
+                "exchange_ratio": f.blue_casualties / max(f.red_casualties, 1),
                 "n_steps": f.n_steps
             })
 

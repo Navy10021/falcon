@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from dataclasses import dataclass, field
 
@@ -409,10 +410,6 @@ class BlueAgent:
         self.optimizer.load_state_dict(ckpt["optimizer"])
         self.total_steps = ckpt.get("total_steps", 0)
         self.episode_count = ckpt.get("episode_count", 0)
-
-
-# 순환 import 방지
-import torch.nn.functional as F
 
 
 if __name__ == "__main__":
