@@ -5,13 +5,98 @@ Monte Carlo 강건성 평가 (5,000+ 시나리오)
 - 다양한 초기 조건에서의 전략 성능 분포 평가
 - 신뢰구간 계산
 - 취약점 분석
+- ProcessPoolExecutor 기반 병렬화 (n_workers > 1)
 """
 
 from __future__ import annotations
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from tqdm import tqdm
+
+
+def _mc_run_worker(args: Dict) -> "MCResult":
+    """
+    단일 Monte Carlo 런 실행 — ProcessPoolExecutor 워커용 최상위 함수.
+
+    Parameters
+    ----------
+    args : dict
+        run_id, base_seed, max_steps, fog_level_name, checkpoint_path
+    """
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+    from ontology.combat_schema import ScenarioFactory, ForceAlignment
+    from simulator.lanchester_engine import LanchesterEngine
+    from rl_agent.blue_agent import BlueAgent, build_state_vector
+
+    run_id: int = args["run_id"]
+    base_seed: int = args["base_seed"]
+    max_steps: int = args["max_steps"]
+    fog_level_name: Optional[str] = args.get("fog_level_name")
+    checkpoint_path: Optional[str] = args.get("checkpoint_path")
+
+    rng = np.random.RandomState(base_seed + run_id)
+    n_blue = int(rng.randint(5, 13))
+    n_red  = int(rng.randint(4, 10))
+
+    engine = LanchesterEngine(seed=base_seed + run_id)
+    agent  = BlueAgent()
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        agent.load(checkpoint_path)
+
+    fog_filter = None
+    if fog_level_name:
+        from simulator.fog_of_war import FogOfWarFilter, FogLevel
+        fog_level = getattr(FogLevel, fog_level_name.upper(), None)
+        if fog_level is not None:
+            fog_filter = FogOfWarFilter(fog_level, seed=base_seed + run_id)
+
+    kg = ScenarioFactory.create_standard_scenario(
+        n_blue=n_blue, n_red=n_red, seed=base_seed + run_id
+    )
+    initial_blue_hc = sum(u.headcount for u in kg.units.values()
+                          if u.alignment == ForceAlignment.BLUE)
+
+    blue_casualties = 0
+    red_casualties  = 0
+    winner = "draw"
+    n_steps = 0
+
+    for _ in range(max_steps):
+        if fog_filter:
+            obs_kg, uncertainty = fog_filter.observe(kg, ForceAlignment.BLUE)
+            state = build_state_vector(obs_kg, uncertainty_map=uncertainty)
+        else:
+            state = build_state_vector(kg)
+
+        agent.select_action(state, deterministic=True)
+
+        step = engine.run_step(kg)
+        blue_casualties += step.blue_total_casualties
+        red_casualties  += step.red_total_casualties
+        n_steps += 1
+
+        if step.mission_status != "ongoing":
+            winner = step.mission_status
+            break
+
+    final_blue_hc = sum(u.headcount for u in kg.units.values()
+                        if u.alignment == ForceAlignment.BLUE)
+    force_reduction = (initial_blue_hc - final_blue_hc) / max(initial_blue_hc, 1)
+
+    return MCResult(
+        run_id=run_id,
+        winner=winner,
+        blue_casualties=blue_casualties,
+        red_casualties=red_casualties,
+        n_steps=n_steps,
+        force_reduction_ratio=force_reduction,
+        initial_conditions={"n_blue": n_blue, "n_red": n_red},
+    )
 
 
 @dataclass
@@ -49,28 +134,68 @@ class MonteCarloEvaluator:
     다양한 초기 조건 + 확률적 전투 결과로 전략 성능 분포 계산
     """
 
-    def __init__(self, n_runs: int = 5000, seed: int = 0):
+    def __init__(self, n_runs: int = 5000, seed: int = 0,
+                 n_workers: int = 1, checkpoint_path: Optional[str] = None):
         self.n_runs = n_runs
         self.base_seed = seed
+        self.n_workers = n_workers
+        self.checkpoint_path = checkpoint_path
 
     def evaluate(
         self,
-        agent,          # BlueAgent
-        engine,         # LanchesterEngine
+        agent=None,     # BlueAgent (순차 모드에서만 사용)
+        engine=None,    # LanchesterEngine (순차 모드에서만 사용)
         fog_filter=None,
+        fog_level_name: Optional[str] = None,
         scenario_kwargs: Optional[Dict] = None,
         verbose: bool = True,
         show_progress: bool = True,
-        max_steps: int = 50
+        max_steps: int = 50,
     ) -> MCEvaluationReport:
         """
-        Monte Carlo 평가 실행
+        Monte Carlo 평가 실행.
+
+        n_workers > 1 이면 ProcessPoolExecutor로 병렬 실행.
+        병렬 모드에서는 각 워커가 내부에서 engine/agent를 재생성하므로
+        agent / engine 인자는 checkpoint_path 로 대체된다.
+
+        fog_level_name : fog_filter 가 None 일 때 워커에서 fog 생성용.
+            FogLevel enum 멤버 이름 (예: "MODERATE").
         """
+        # fog_level 이름 추출 (fog_filter 우선)
+        _fog_name: Optional[str] = fog_level_name
+        if fog_filter is not None and _fog_name is None:
+            # fog_filter.fog_level 가 FogLevel enum 이라고 가정
+            try:
+                _fog_name = fog_filter.fog_level.name
+            except AttributeError:
+                _fog_name = None
+
+        if self.n_workers > 1:
+            return self._evaluate_parallel(
+                max_steps=max_steps,
+                fog_level_name=_fog_name,
+                verbose=verbose,
+                show_progress=show_progress,
+            )
+        else:
+            return self._evaluate_sequential(
+                agent=agent,
+                engine=engine,
+                fog_filter=fog_filter,
+                max_steps=max_steps,
+                verbose=verbose,
+                show_progress=show_progress,
+            )
+
+    # ------------------------------------------------------------------
+    def _evaluate_sequential(
+        self, agent, engine, fog_filter, max_steps, verbose, show_progress
+    ) -> MCEvaluationReport:
         from ontology.combat_schema import ScenarioFactory, ForceAlignment
         from rl_agent.blue_agent import build_state_vector
 
         results: List[MCResult] = []
-        scenario_kw = scenario_kwargs or {}
 
         iterator = range(self.n_runs)
         if verbose and show_progress:
@@ -92,14 +217,14 @@ class MonteCarloEvaluator:
             winner = "draw"
             n_steps = 0
 
-            for step_t in range(max_steps):
+            for _ in range(max_steps):
                 if fog_filter:
                     obs_kg, uncertainty = fog_filter.observe(kg, ForceAlignment.BLUE)
                     state = build_state_vector(obs_kg, uncertainty_map=uncertainty)
                 else:
                     state = build_state_vector(kg)
 
-                action, _, _ = agent.select_action(state, deterministic=True)
+                agent.select_action(state, deterministic=True)
 
                 step = engine.run_step(kg)
                 blue_casualties += step.blue_total_casualties
@@ -121,9 +246,51 @@ class MonteCarloEvaluator:
                 red_casualties=red_casualties,
                 n_steps=n_steps,
                 force_reduction_ratio=force_reduction,
-                initial_conditions={"n_blue": n_blue, "n_red": n_red}
+                initial_conditions={"n_blue": n_blue, "n_red": n_red},
             ))
 
+        return self._compute_report(results)
+
+    # ------------------------------------------------------------------
+    def _evaluate_parallel(
+        self,
+        max_steps: int,
+        fog_level_name: Optional[str],
+        verbose: bool,
+        show_progress: bool,
+    ) -> MCEvaluationReport:
+        """ProcessPoolExecutor 기반 병렬 Monte Carlo 평가."""
+        worker_args = [
+            {
+                "run_id":          i,
+                "base_seed":       self.base_seed,
+                "max_steps":       max_steps,
+                "fog_level_name":  fog_level_name,
+                "checkpoint_path": self.checkpoint_path,
+            }
+            for i in range(self.n_runs)
+        ]
+
+        results: List[MCResult] = []
+        pbar = tqdm(total=self.n_runs, desc="Monte Carlo 병렬 평가") \
+               if (verbose and show_progress) else None
+
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            futures = {executor.submit(_mc_run_worker, a): a for a in worker_args}
+            for future in as_completed(futures):
+                try:
+                    results.append(future.result())
+                except Exception as exc:  # noqa: BLE001
+                    # 개별 런 실패 시 skip (전체 중단 방지)
+                    if verbose:
+                        print(f"  [MC worker error] {exc}")
+                if pbar is not None:
+                    pbar.update(1)
+
+        if pbar is not None:
+            pbar.close()
+
+        results.sort(key=lambda r: r.run_id)
         return self._compute_report(results)
 
     def _compute_report(self, results: List[MCResult]) -> MCEvaluationReport:
