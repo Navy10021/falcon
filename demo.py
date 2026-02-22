@@ -82,7 +82,7 @@ def run_demo(args):
     obs_kg, uncertainty_map = fog_filter.observe(kg, ForceAlignment.BLUE)
     x, adj = prepare_graph_tensors(obs_kg)
 
-    gnn = BayesianHGT(node_in_dim=32, hidden_dim=64, n_layers=2, mc_samples=15)
+    gnn = BayesianHGT(node_in_dim=128, hidden_dim=64, n_layers=2, mc_samples=15)
 
     print(f"\n🔮 MC Dropout GNN 예측 (N=15):")
     gnn_out = gnn.predict_with_uncertainty(x, adj)

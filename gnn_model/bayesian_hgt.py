@@ -97,7 +97,7 @@ class BayesianHGT(nn.Module):
 
     def __init__(
         self,
-        node_in_dim: int = 32,
+        node_in_dim: int = 128,
         hidden_dim: int = 128,
         n_layers: int = 3,
         n_heads: int = 4,
@@ -338,7 +338,7 @@ if __name__ == "__main__":
     x, adj = prepare_graph_tensors(kg)
     print(f"입력 노드 특성: {x.shape}, 인접 행렬: {adj.shape}")
 
-    model = BayesianHGT(node_in_dim=32, hidden_dim=128, n_layers=2, mc_samples=10)
+    model = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=10)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"모델 파라미터 수: {n_params:,}")
 

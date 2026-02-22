@@ -186,7 +186,7 @@ def train_phase1(args):
     engine = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)  # P3-1
     curriculum = CurriculumScheduler()
-    gnn = BayesianHGT(node_in_dim=32, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
+    gnn = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim = torch.optim.Adam(gnn.parameters(), lr=1e-3)
     gnn_loss_fn = CombatGNNLoss()
 
@@ -507,7 +507,7 @@ def train_phase4(args):
     engine          = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)
     curriculum      = CurriculumScheduler()
-    gnn             = BayesianHGT(node_in_dim=32, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
+    gnn             = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim       = torch.optim.Adam(gnn.parameters(), lr=1e-3)
     gnn_loss_fn     = CombatGNNLoss()
     ppo_config      = PPOConfig(lr=args.lr, n_epochs=args.ppo_epochs)
