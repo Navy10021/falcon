@@ -521,7 +521,7 @@ class ROEManager:
 
         nearby_friendly = 0
         tx, ty = target.position.x, target.position.y
-        scale = getattr(kg, "map_size_km", 100.0) or 100.0
+        # Position 좌표는 [0, map_size_km] 범위 — scale 불필요
 
         for uid, u in kg.units.items():
             if uid == target.unit_id:
@@ -534,7 +534,7 @@ class ROEManager:
                 continue
             dist_km = (
                 ((u.position.x - tx) ** 2 + (u.position.y - ty) ** 2) ** 0.5
-            ) * scale
+            )
             if dist_km <= blast_radius_km:
                 nearby_friendly += 1
 
@@ -544,7 +544,7 @@ class ROEManager:
             if u.unit_type in PROTECTED_UNIT_TYPES
             and u.status != UnitStatus.DESTROYED
             and u.position is not None
-            and (((u.position.x - tx)**2 + (u.position.y - ty)**2)**0.5 * scale) <= blast_radius_km
+            and (((u.position.x - tx)**2 + (u.position.y - ty)**2)**0.5) <= blast_radius_km
         )
 
         raw = (nearby_friendly * 0.05) + (protected_count * 0.15)

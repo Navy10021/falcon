@@ -434,19 +434,34 @@ class CombatDynamicsManager:
         step_result: Dict,
         isr_quality: float = 0.7,
         n_engagements_per_unit: int = 1,
+        intel_manager=None,     # IntelligenceManager (optional) — ISR 품질 자동 계산
     ) -> Dict:
         """
         1 시뮬레이션 스텝 완료 후 호출.
 
         Parameters
         ----------
-        step_result : MixedLanchesterEngine.run_step_mixed() 반환값
-        isr_quality : 아군 ISR 자산 품질 (BDA 신뢰도에 반영)
+        step_result    : MixedLanchesterEngine.run_step_mixed() 반환값
+        isr_quality    : 아군 ISR 자산 품질 (BDA 신뢰도에 반영)
+        intel_manager  : IntelligenceManager — 제공 시 isr_quality 자동 갱신
+                         및 intel step() 수행 후 FogOfWar 업데이트
 
         Returns
         -------
-        dict with keys: bda_list, supply_summary, ems_state
+        dict with keys: bda_list, supply_summary, ems_state, gnn_unc_multiplier,
+                        isr_quality (사용된 값)
         """
+        # intel_manager가 있으면 ISR 품질 자동 계산 및 스텝 수행
+        if intel_manager is not None:
+            try:
+                new_rpts = intel_manager.step(
+                    kg=kg,
+                    collector_alignment=ForceAlignment.BLUE,
+                    ems_jamming=self.ems_env.comms_jamming,
+                )
+                isr_quality = intel_manager.get_isr_quality(ForceAlignment.BLUE, kg)
+            except Exception:
+                pass  # intel_manager 오류 시 기본값 유지
         self._step += 1
         new_bdas: List[BattleDamageAssessment] = []
 
@@ -496,10 +511,11 @@ class CombatDynamicsManager:
         ))
 
         return {
-            "bda_list":       [b.to_dict() for b in new_bdas],
-            "supply_summary": supply_summary,
-            "ems_state":      self.ems_env.to_state_vector().tolist(),
+            "bda_list":           [b.to_dict() for b in new_bdas],
+            "supply_summary":     supply_summary,
+            "ems_state":          self.ems_env.to_state_vector().tolist(),
             "gnn_unc_multiplier": self.ems_env.gnn_uncertainty_multiplier(),
+            "isr_quality":        isr_quality,  # 실제 사용된 ISR 품질 (intel 연동 반영)
         }
 
     def get_supply_penalty(self, alignment: ForceAlignment,
