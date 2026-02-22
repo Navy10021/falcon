@@ -176,10 +176,11 @@ def train_phase1(args):
             step_result = engine.run_step(kg, action_pairs=action_pairs)
             done = (step_result.mission_status != "ongoing")
 
-            # P1-1: prev_blue_hc 기반 스텝별 보상 계산
+            # P1-1: prev_blue_hc 기반 스텝별 보상 계산 (P2-6: initial_force_size 전달)
             reward = blue_agent.compute_reward(
                 step_result, prev_blue_hc,
-                step_result.blue_total_headcount, avg_unc
+                step_result.blue_total_headcount, avg_unc,
+                initial_force_size=initial_blue_hc,
             )
             prev_blue_hc = step_result.blue_total_headcount
             episode_reward += reward

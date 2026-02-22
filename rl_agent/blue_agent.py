@@ -263,46 +263,73 @@ class BlueAgent:
         # 훈련 기록
         self.training_logs: List[Dict] = []
 
+    # ── 보상 계수 상수 ───────────────────────────────────────────────────
+    _W_WIN          =  10.0   # 승리 보상
+    _W_LOSS         = -10.0   # 패배 패널티
+    _W_CASUALTY     =   0.05  # 아군 사상자당 패널티
+    _W_FORCE_SAVE   =   0.15  # 스텝별 병력 절감 보상 (이전 0.01 → 0.15, 15× 상향)
+    _W_FORCE_RATIO  =   2.0   # 임무 종료 시 잔존 병력 비율 보너스 스케일
+    _W_ENEMY_DMG    =   0.03  # 적 사상자 보상 (이전 0.02 → 0.03)
+    # ────────────────────────────────────────────────────────────────────
+
     def compute_reward(
         self,
         step_result,            # BattleStep
         force_size_before: int,
         force_size_after: int,
         uncertainty: float = 0.0,
-        config: Optional[PPOConfig] = None
+        config: Optional[PPOConfig] = None,
+        initial_force_size: int = 0,    # 에피소드 시작 병력 (종료 보너스 계산용)
     ) -> float:
         """
-        보상 함수: R = w1×Win - w2×Casualty - w3×ForceSize - w4×UncertaintyPenalty
+        보상 함수 (P2-6 보상 스케일 재조정):
+
+          R = w_win × WinSignal
+            - w_cas  × BlueCasualties
+            + w_save × ForceReduction        ← 핵심: 15× 상향
+            + w_ratio× SurvivalRatioBonus    ← 임무 종료 시 잔존 비율 보너스
+            + w_edm  × RedCasualties
+            - UncertaintyPenalty
         """
         cfg = config or self.config
 
-        # 승리 보상
+        # 1. 승/패 보상
         win_reward = 0.0
+        terminal = step_result.mission_status != "ongoing"
         if step_result.mission_status == "blue_win":
-            win_reward = 10.0
+            win_reward = self._W_WIN
         elif step_result.mission_status == "red_win":
-            win_reward = -10.0
+            win_reward = -self._W_WIN
 
-        # 사상자 패널티
-        casualty_penalty = step_result.blue_total_casualties * 0.05
+        # 2. 아군 사상자 패널티
+        casualty_penalty = step_result.blue_total_casualties * self._W_CASUALTY
 
-        # 병력 절감 보상 (핵심 목표)
+        # 3. 스텝별 병력 절감 보상 (핵심 목표 — 대폭 상향)
         force_reduction = force_size_before - force_size_after
-        force_reward = 0.01 * force_reduction if force_reduction > 0 else 0.0
+        force_reward = self._W_FORCE_SAVE * force_reduction if force_reduction > 0 else 0.0
 
-        # 불확실성 패널티 (불확실한 상황에서 병력 감축 시 추가 패널티)
+        # 4. 임무 종료 시 잔존 병력 비율 보너스
+        #    최종 병력 / 초기 병력 비율이 높을수록 큰 보상
+        survival_bonus = 0.0
+        if terminal and initial_force_size > 0:
+            survival_ratio = force_size_after / initial_force_size
+            survival_bonus = self._W_FORCE_RATIO * survival_ratio
+
+        # 5. 적 사상자 보상
+        enemy_damage = step_result.red_total_casualties * self._W_ENEMY_DMG
+
+        # 6. 불확실성 패널티 (불확실한 상황에서 과감한 병력 운용 시 패널티)
         uncertainty_penalty = 0.0
         if uncertainty > 0.5 and force_reduction > 0:
-            uncertainty_penalty = cfg.uncertainty_penalty_coef * uncertainty * force_reduction * 0.01
-
-        # 적 사상자 보상 (약하게)
-        enemy_damage = step_result.red_total_casualties * 0.02
+            uncertainty_penalty = (cfg.uncertainty_penalty_coef
+                                   * uncertainty * force_reduction * 0.05)
 
         reward = (win_reward
                   - casualty_penalty
                   + force_reward
-                  - uncertainty_penalty
-                  + enemy_damage)
+                  + survival_bonus
+                  + enemy_damage
+                  - uncertainty_penalty)
 
         return float(reward)
 
