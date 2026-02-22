@@ -35,28 +35,39 @@ class BlueActionSpace:
     ACTION_NAMES = ["Reinforce", "Advance", "Withdraw", "Reallocate", "Support", "Flank"]
 
 
-STATE_DIM = 64  # 전체 상태 벡터 차원
+STATE_DIM = 128  # 전체 상태 벡터 차원 (확장판: 64 → 128)
+
+# Branch / Domain 레이블 (순서 고정)
+_BRANCHES = ["army", "navy", "air_force", "marine_corps", "strategic", "space", "cyber"]
+_DOMAINS  = ["land", "sea", "air", "subsurface", "cyber", "space", "strategic"]
 
 
 def build_state_vector(
     kg,
     gnn_extension: Optional[np.ndarray] = None,
     temporal_features: Optional[np.ndarray] = None,
-    uncertainty_map: Optional[Dict[str, float]] = None
+    uncertainty_map: Optional[Dict[str, float]] = None,
+    c2_quality: float = 1.0,          # 지휘통제 품질 [0,1]
+    joint_fires_available: float = 0.0 # 합동화력 가용 여부 [0,1]
 ) -> np.ndarray:
     """
-    PPO 상태 벡터 구성 (64차원)
-    
-    기본 전장 상태 (40D) + GNN 불확실성 (6D) + 시계열 트렌드 (8D) + 패딩 (10D)
-    """
-    stats = kg.get_stats()
+    PPO 상태 벡터 구성 (128차원)
 
-    # 기본 전장 상태 (40D)
+    구성:
+      병력 현황 (10D) + Blue 상태분포 (4D) + Red 상태분포 (4D)
+    + Blue 군종 구성 (7D) + Red 군종 구성 (7D)
+    + Blue 도메인 구성 (7D) + Red 도메인 구성 (7D)
+    + 지형 정보 (6D) + C2·합동화력 (4D)
+    = 56D 기본  +  GNN 불확실성 (8D) + 시계열 트렌드 (8D)
+    = 72D → 128D 패딩
+    """
     from ontology.combat_schema import ForceAlignment, UnitStatus
 
     blue_units = [u for u in kg.units.values() if u.alignment == ForceAlignment.BLUE]
     red_units  = [u for u in kg.units.values() if u.alignment == ForceAlignment.RED]
 
+    n_blue = max(len(blue_units), 1)
+    n_red  = max(len(red_units),  1)
     n_blue_active = sum(1 for u in blue_units if u.status != UnitStatus.DESTROYED)
     n_red_active  = sum(1 for u in red_units  if u.status != UnitStatus.DESTROYED)
     blue_hc = max(sum(u.headcount for u in blue_units), 1)
@@ -67,55 +78,108 @@ def build_state_vector(
 
     avg_unc = np.mean(list(uncertainty_map.values())) if uncertainty_map else 0.0
 
-    base_state = np.array([
-        # 병력 현황 (10D)
+    # ── 10D: 전장 종합 현황 ──────────────────────────────
+    force_state = np.array([
         n_blue_active / 10.0,
         n_red_active  / 10.0,
-        blue_hc / 1000.0,
-        red_hc  / 1000.0,
-        blue_cp,
-        red_cp,
-        blue_cp / max(red_cp, 1e-6),  # 전력 비율
+        blue_hc / 10000.0,            # 대규모 부대 단위로 정규화
+        red_hc  / 10000.0,
+        float(np.clip(blue_cp, 0, 20)),
+        float(np.clip(red_cp,  0, 20)),
+        float(np.clip(blue_cp / max(red_cp, 1e-6), 0, 5)),  # 전력 비율
         blue_morale,
-        avg_unc,                        # 전장 불확실성
-        float(n_blue_active > n_red_active),  # 병력 우세 여부
-
-        # 상태별 유닛 수 (Blue) (4D)
-        sum(1 for u in blue_units if u.status.value == "active")    / max(n_blue_active, 1),
-        sum(1 for u in blue_units if u.status.value == "degraded")  / max(n_blue_active, 1),
-        sum(1 for u in blue_units if u.status.value == "critical")  / max(n_blue_active, 1),
-        sum(1 for u in blue_units if u.status.value == "destroyed") / max(len(blue_units), 1),
-
-        # 상태별 유닛 수 (Red) (4D)
-        sum(1 for u in red_units if u.status.value == "active")    / max(n_red_active, 1),
-        sum(1 for u in red_units if u.status.value == "degraded")  / max(n_red_active, 1),
-        sum(1 for u in red_units if u.status.value == "critical")  / max(n_red_active, 1),
-        sum(1 for u in red_units if u.status.value == "destroyed") / max(len(red_units), 1),
-
-        # 유닛 유형 구성 Blue (8D)
-        *[sum(1 for u in blue_units if u.unit_type.value == t) / max(len(blue_units), 1)
-          for t in ["infantry", "armor", "artillery", "aviation", "engineer", "signal", "logistics", "electronic_warfare"]],
-
-        # 유닛 유형 구성 Red (8D)
-        *[sum(1 for u in red_units if u.unit_type.value == t) / max(len(red_units), 1)
-          for t in ["infantry", "armor", "artillery", "aviation", "engineer", "signal", "logistics", "electronic_warfare"]],
-
-        # 지형 정보 (6D)
-        *[sum(1 for c in kg.terrain_cells.values() if c.terrain_type.value == t) / max(len(kg.terrain_cells), 1)
-          for t in ["open", "urban", "forest", "mountain", "river", "coastal"]],
+        avg_unc,
+        float(n_blue_active > n_red_active),
     ], dtype=np.float32)
 
-    # GNN 불확실성 확장 (6D)
+    # ── 4D: Blue 상태 분포 ────────────────────────────────
+    blue_status = np.array([
+        sum(1 for u in blue_units if u.status.value == "active")    / n_blue,
+        sum(1 for u in blue_units if u.status.value == "degraded")  / n_blue,
+        sum(1 for u in blue_units if u.status.value == "critical")  / n_blue,
+        sum(1 for u in blue_units if u.status.value == "destroyed") / n_blue,
+    ], dtype=np.float32)
+
+    # ── 4D: Red 상태 분포 ─────────────────────────────────
+    red_status = np.array([
+        sum(1 for u in red_units if u.status.value == "active")    / n_red,
+        sum(1 for u in red_units if u.status.value == "degraded")  / n_red,
+        sum(1 for u in red_units if u.status.value == "critical")  / n_red,
+        sum(1 for u in red_units if u.status.value == "destroyed") / n_red,
+    ], dtype=np.float32)
+
+    # ── 7D: Blue 군종(branch) 구성 ────────────────────────
+    blue_branch = np.array([
+        sum(1 for u in blue_units if hasattr(u, "branch") and u.branch.value == b) / n_blue
+        for b in _BRANCHES
+    ], dtype=np.float32)
+
+    # ── 7D: Red 군종(branch) 구성 ─────────────────────────
+    red_branch = np.array([
+        sum(1 for u in red_units if hasattr(u, "branch") and u.branch.value == b) / n_red
+        for b in _BRANCHES
+    ], dtype=np.float32)
+
+    # ── 7D: Blue 도메인 구성 ──────────────────────────────
+    blue_domain = np.array([
+        sum(1 for u in blue_units if hasattr(u, "domain") and u.domain.value == d) / n_blue
+        for d in _DOMAINS
+    ], dtype=np.float32)
+
+    # ── 7D: Red 도메인 구성 ───────────────────────────────
+    red_domain = np.array([
+        sum(1 for u in red_units if hasattr(u, "domain") and u.domain.value == d) / n_red
+        for d in _DOMAINS
+    ], dtype=np.float32)
+
+    # ── 6D: 지형 구성 ─────────────────────────────────────
+    n_terrain = max(len(kg.terrain_cells), 1)
+    terrain_state = np.array([
+        sum(1 for c in kg.terrain_cells.values() if c.terrain_type.value == t) / n_terrain
+        for t in ["open", "urban", "forest", "mountain", "river", "coastal"]
+    ], dtype=np.float32)
+
+    # ── 4D: C2·합동화력 정보 ─────────────────────────────
+    c2_state = np.array([
+        float(np.clip(c2_quality, 0, 1)),
+        float(np.clip(joint_fires_available, 0, 1)),
+        # Blue 잔존 전투력 비율 (사이버·전자전 유닛)
+        sum(u.combat_power for u in blue_units
+            if hasattr(u, "domain") and u.domain.value in ("cyber",)) / max(blue_cp, 1e-6),
+        # Red 사이버·EW 위협 수준
+        sum(u.combat_power for u in red_units
+            if hasattr(u, "domain") and u.domain.value in ("cyber",)) / max(red_cp, 1e-6),
+    ], dtype=np.float32)
+
+    # 기본 56D 결합
+    base_state = np.concatenate([
+        force_state,    # 10
+        blue_status,    # 4
+        red_status,     # 4
+        blue_branch,    # 7
+        red_branch,     # 7
+        blue_domain,    # 7
+        red_domain,     # 7
+        terrain_state,  # 6
+        c2_state,       # 4
+    ])  # = 56D
+
+    # GNN 불확실성 확장 (8D)
     if gnn_extension is None:
-        gnn_extension = np.zeros(6, dtype=np.float32)
+        gnn_extension = np.zeros(8, dtype=np.float32)
+    gnn_ext = np.zeros(8, dtype=np.float32)
+    n_gnn = min(len(gnn_extension), 8)
+    gnn_ext[:n_gnn] = gnn_extension[:n_gnn]
 
     # 시계열 트렌드 (8D)
     if temporal_features is None:
         temporal_features = np.zeros(8, dtype=np.float32)
+    temp_feat = np.zeros(8, dtype=np.float32)
+    n_temp = min(len(temporal_features), 8)
+    temp_feat[:n_temp] = temporal_features[:n_temp]
 
-    # 결합 및 패딩
-    combined = np.concatenate([base_state[:40], gnn_extension[:6], temporal_features[:8]])
-    # 64차원으로 패딩
+    # 72D → 128D 패딩
+    combined = np.concatenate([base_state, gnn_ext, temp_feat])   # 72D
     result = np.zeros(STATE_DIM, dtype=np.float32)
     result[:len(combined)] = combined[:STATE_DIM]
     result = np.nan_to_num(result, nan=0.0, posinf=10.0, neginf=-10.0)
@@ -128,7 +192,7 @@ def build_state_vector(
 # ──────────────────────────────────────────────
 
 class ActorCritic(nn.Module):
-    """공유 백본 Actor-Critic 네트워크"""
+    """공유 백본 Actor-Critic 네트워크 (STATE_DIM=128 지원)"""
 
     def __init__(self, state_dim: int = STATE_DIM, n_actions: int = BlueActionSpace.N_ACTIONS,
                  hidden_dim: int = 256):

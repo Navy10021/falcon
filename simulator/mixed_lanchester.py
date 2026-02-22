@@ -18,7 +18,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from ontology.combat_schema import (
-    Unit, UnitType, UnitStatus, ForceAlignment, TerrainType, CombatKnowledgeGraph
+    Unit, UnitType, UnitStatus, ForceAlignment, TerrainType, CombatKnowledgeGraph,
+    DomainType,
 )
 
 
@@ -74,8 +75,16 @@ class MixedLanchesterEngine:
         "coastal":  0.25,
     }
 
+    # 항공 지원으로 인정되는 UnitType 집합
+    _AVIATION_TYPES: set = {
+        UnitType.AVIATION, UnitType.FIGHTER, UnitType.STRIKE_AIRCRAFT, UnitType.BOMBER,
+        UnitType.NAVAL_AVIATION, UnitType.MARINE_AVIATION, UnitType.UAV_STRIKE,
+        UnitType.UAV_RECON, UnitType.LOITERING_MUNITION, UnitType.ISR_AIRCRAFT,
+    }
+
     UNIT_LINEAR_BIAS: Dict[str, float] = {
-        # 값이 높을수록 정규전 비중 증가
+        # 값이 높을수록 정규전(2차 법칙) 비중 증가
+        # ── 기존 8종 ─────────────────────────────────
         "infantry":           0.50,
         "armor":              0.85,
         "artillery":          0.70,
@@ -84,6 +93,70 @@ class MixedLanchesterEngine:
         "signal":             0.20,
         "logistics":          0.15,
         "electronic_warfare": 0.30,
+        # ── 육군 신규 ────────────────────────────────
+        "mechanized_infantry":    0.80,
+        "airborne":               0.45,
+        "special_forces":         0.30,
+        "anti_armor":             0.60,
+        "air_defense_artillery":  0.75,
+        "reconnaissance":         0.35,
+        "nbc_defense":            0.30,
+        "military_police":        0.40,
+        # ── 해군 ─────────────────────────────────────
+        "destroyer":          0.80,
+        "frigate":            0.78,
+        "submarine":          0.70,
+        "mine_warfare":       0.60,
+        "amphibious_ship":    0.65,
+        "naval_aviation":     0.82,
+        "coastal_defense":    0.65,
+        # ── 공군 ─────────────────────────────────────
+        "fighter":            0.88,
+        "strike_aircraft":    0.85,
+        "bomber":             0.85,
+        "transport_aircraft": 0.20,
+        "isr_aircraft":       0.20,
+        "early_warning":      0.15,
+        "air_refueling":      0.15,
+        "sam_battery":        0.75,
+        # ── 해병대 ───────────────────────────────────
+        "marine_infantry":    0.55,
+        "marine_armor":       0.82,
+        "marine_aviation":    0.80,
+        # ── 미사일 ───────────────────────────────────
+        "ballistic_missile":  0.95,
+        "cruise_missile":     0.92,
+        "mlrs":               0.80,
+        # ── 드론 ─────────────────────────────────────
+        "uav_recon":          0.50,
+        "uav_strike":         0.75,
+        "loitering_munition": 0.80,
+        # ── 사이버/우주 ───────────────────────────────
+        "cyber_unit":         0.05,
+        "space_asset":        0.10,
+    }
+
+    # 신규 유닛 타입 → 기존 카테고리 매핑 (전투 효율 행렬 폴백)
+    _UNIT_CATEGORY_MAP: Dict[str, str] = {
+        "mechanized_infantry": "armor",    "airborne": "infantry",
+        "special_forces": "infantry",      "anti_armor": "artillery",
+        "air_defense_artillery": "artillery", "reconnaissance": "infantry",
+        "nbc_defense": "engineer",         "military_police": "infantry",
+        "destroyer": "aviation",           "frigate": "aviation",
+        "submarine": "aviation",           "mine_warfare": "artillery",
+        "amphibious_ship": "logistics",    "naval_aviation": "aviation",
+        "coastal_defense": "artillery",
+        "fighter": "aviation",             "strike_aircraft": "aviation",
+        "bomber": "aviation",              "transport_aircraft": "logistics",
+        "isr_aircraft": "signal",          "early_warning": "signal",
+        "air_refueling": "logistics",      "sam_battery": "artillery",
+        "marine_infantry": "infantry",     "marine_armor": "armor",
+        "marine_aviation": "aviation",
+        "ballistic_missile": "artillery",  "cruise_missile": "artillery",
+        "mlrs": "artillery",
+        "uav_recon": "signal",             "uav_strike": "aviation",
+        "loitering_munition": "artillery",
+        "cyber_unit": "electronic_warfare","space_asset": "signal",
     }
 
     COMBAT_EFFICIENCY: Dict[str, Dict[str, float]] = {
@@ -109,6 +182,30 @@ class MixedLanchesterEngine:
         "open": 1.0, "urban": 1.8, "forest": 1.4,
         "mountain": 1.6, "river": 1.2, "coastal": 1.3,
     }
+
+    def _get_combat_efficiency(self, atk_type: str, def_type: str) -> float:
+        """
+        전투 효율 조회.
+        1. 직접 조회 → 2. 카테고리 폴백 → 3. 기본값 1.0
+        """
+        direct = self.COMBAT_EFFICIENCY.get(atk_type, {}).get(def_type)
+        if direct is not None:
+            return direct
+        # 카테고리 폴백
+        atk_cat = self._UNIT_CATEGORY_MAP.get(atk_type, atk_type)
+        def_cat = self._UNIT_CATEGORY_MAP.get(def_type, def_type)
+        return self.COMBAT_EFFICIENCY.get(atk_cat, {}).get(def_cat, 1.0)
+
+    def _has_aviation_support(self, kg: Optional[CombatKnowledgeGraph], alignment: ForceAlignment) -> bool:
+        """아군 항공 지원 여부 판별 (확장된 항공 유닛 타입 포함)"""
+        if kg is None:
+            return False
+        return any(
+            u.unit_type in self._AVIATION_TYPES
+            and u.alignment == alignment
+            and u.status != UnitStatus.DESTROYED
+            for u in kg.units.values()
+        )
 
     def __init__(self, noise_std: float = 0.10, seed: Optional[int] = None):
         self.noise_std = noise_std
@@ -260,9 +357,9 @@ class MixedLanchesterEngine:
         atk_type = attacker.unit_type.value
         def_type = defender.unit_type.value
 
-        # 기본 전투 효율
-        alpha = self.COMBAT_EFFICIENCY.get(atk_type, {}).get(def_type, 1.0)
-        beta  = self.COMBAT_EFFICIENCY.get(def_type, {}).get(atk_type, 1.0)
+        # 기본 전투 효율 (신규 UnitType 폴백 포함)
+        alpha = self._get_combat_efficiency(atk_type, def_type)
+        beta  = self._get_combat_efficiency(def_type, atk_type)
 
         # 지형 방어 보너스
         terrain_key = defender_terrain or "open"
@@ -304,13 +401,8 @@ class MixedLanchesterEngine:
             )
             alpha *= encirclement_penalty
 
-        # 항공 지원 여부
-        has_aviation = any(
-            u.unit_type == UnitType.AVIATION
-            and u.alignment == attacker.alignment
-            and u.status != UnitStatus.DESTROYED
-            for u in (kg.units.values() if kg else [])
-        )
+        # 항공 지원 여부 (모든 항공 UnitType 포함)
+        has_aviation = self._has_aviation_support(kg, attacker.alignment)
 
         # 혼합 비율 결정
         linear_ratio, mode = self.determine_mix_ratio(
