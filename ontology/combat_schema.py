@@ -351,8 +351,7 @@ class ScenarioFactory:
         seed: Optional[int] = None
     ) -> CombatKnowledgeGraph:
         """표준 교전 시나리오 생성"""
-        if seed is not None:
-            np.random.seed(seed)
+        rng = np.random.RandomState(seed)
 
         kg = CombatKnowledgeGraph()
 
@@ -362,7 +361,7 @@ class ScenarioFactory:
         cell_size = map_size_km / grid_size
         for i in range(grid_size):
             for j in range(grid_size):
-                terrain = terrain_types[np.random.randint(len(terrain_types))]
+                terrain = terrain_types[rng.randint(len(terrain_types))]
                 pos = Position(i * cell_size + cell_size/2, j * cell_size + cell_size/2)
                 cell = TerrainCell.from_type(f"cell_{i}_{j}", pos, terrain)
                 kg.add_terrain(cell)
@@ -374,8 +373,8 @@ class ScenarioFactory:
         for i in range(n_blue):
             unit_type = blue_types[i % len(blue_types)]
             pos = Position(
-                np.random.uniform(0, map_size_km * 0.4),
-                np.random.uniform(0, map_size_km)
+                rng.uniform(0, map_size_km * 0.4),
+                rng.uniform(0, map_size_km)
             )
             unit = Unit(
                 unit_id=f"blue_{i}",
@@ -383,9 +382,9 @@ class ScenarioFactory:
                 alignment=ForceAlignment.BLUE,
                 position=pos,
                 capability=Capability.from_unit_type(unit_type),
-                headcount=np.random.randint(80, 200),
-                morale=np.random.uniform(0.6, 1.0),
-                experience=np.random.uniform(0.4, 0.9)
+                headcount=rng.randint(80, 200),
+                morale=rng.uniform(0.6, 1.0),
+                experience=rng.uniform(0.4, 0.9)
             )
             kg.add_unit(unit)
 
@@ -395,8 +394,8 @@ class ScenarioFactory:
         for i in range(n_red):
             unit_type = red_types[i % len(red_types)]
             pos = Position(
-                np.random.uniform(map_size_km * 0.6, map_size_km),
-                np.random.uniform(0, map_size_km)
+                rng.uniform(map_size_km * 0.6, map_size_km),
+                rng.uniform(0, map_size_km)
             )
             unit = Unit(
                 unit_id=f"red_{i}",
@@ -404,9 +403,9 @@ class ScenarioFactory:
                 alignment=ForceAlignment.RED,
                 position=pos,
                 capability=Capability.from_unit_type(unit_type),
-                headcount=np.random.randint(60, 180),
-                morale=np.random.uniform(0.5, 0.9),
-                experience=np.random.uniform(0.3, 0.8)
+                headcount=rng.randint(60, 180),
+                morale=rng.uniform(0.5, 0.9),
+                experience=rng.uniform(0.3, 0.8)
             )
             kg.add_unit(unit)
 

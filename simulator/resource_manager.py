@@ -44,7 +44,7 @@ FUEL_CONSUMPTION_RATE: Dict[str, float] = {
     "engineer":           0.03,
     "signal":             0.02,
     "logistics":          0.04,
-    "electronics_warfare":0.02,
+    "electronic_warfare": 0.02,
 }
 
 # 탄약 부족 시 화력 저하 계수

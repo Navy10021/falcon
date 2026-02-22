@@ -197,8 +197,9 @@ class BayesianHGT(nn.Module):
     ) -> Dict[str, torch.Tensor]:
         """
         MC Dropout으로 불확실성 정량화
-        훈련 모드 유지하여 Dropout 활성화
+        훈련 모드로 전환해 Dropout 활성화 후 복원
         """
+        was_training = self.training
         self.train()  # Dropout 활성화
 
         casualty_means, casualty_logvars = [], []
@@ -211,6 +212,8 @@ class BayesianHGT(nn.Module):
                 casualty_logvars.append(out["casualty_logvar"].unsqueeze(0))
                 risk_means.append(out["risk_mean"].unsqueeze(0))
                 risk_logvars.append(out["risk_logvar"].unsqueeze(0))
+
+        self.train(was_training)  # 호출 전 모드로 복원
 
         cas_means_t = torch.stack(casualty_means)  # [S, 1]
         risk_means_t = torch.stack(risk_means)
