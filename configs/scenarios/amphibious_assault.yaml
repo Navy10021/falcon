@@ -1,0 +1,119 @@
+# ============================================================
+# 시나리오: 도서 상륙작전 (Amphibious Assault)
+# 규모: 해병 연대~여단급 합동 상륙
+# 출처: 학술 연구용 합성 데이터
+# ============================================================
+
+scenario:
+  name: "도서 상륙작전"
+  name_en: "Amphibious Assault Operation"
+  preset_fn: "scenario_amphibious"        # scenario_presets.py (build_amphibious_scenario)
+  description: |
+    도서/해안 상륙작전 시나리오.
+    BLUE(해병 상륙연대 + 해군 함대 + 공군 CAS) vs
+    RED(도서 방어 보병여단 + 해안방어포).
+    해상·수중·지상·공중 4차원 연계 작전.
+
+# ── 병력 규모 ──────────────────────────────────────────
+force:
+  blue:
+    total_headcount: 6500
+    units:
+      - type: marine_infantry
+        echelon: regiment
+        count: 1
+        headcount: 3000
+        designation: "해병 제1상륙연대"
+        morale: 0.90
+        experience: 0.78
+      - type: marine_armor
+        echelon: battalion
+        count: 1
+        headcount: 350
+        designation: "해병 상륙돌격장갑대대"
+      - type: amphibious_ship
+        echelon: ship
+        count: 1
+        headcount: 330
+        designation: "독도함 (LPH)"
+      - type: destroyer
+        echelon: squadron
+        count: 3
+        headcount: 750
+        designation: "구축함 전대"
+      - type: submarine
+        echelon: ship
+        count: 1
+        headcount: 27
+        designation: "손원일급 잠수함"
+      - type: fighter
+        echelon: element
+        count: 2
+        headcount: 30
+        designation: "CAS 편대"
+      - type: marine_aviation
+        echelon: flight
+        count: 1
+        headcount: 20
+        designation: "해병 항공 편대"
+  red:
+    total_headcount: 4500
+    units:
+      - type: infantry
+        echelon: brigade
+        count: 1
+        headcount: 3000
+        designation: "도서 방어 보병여단"
+        morale: 0.78
+        experience: 0.60
+      - type: coastal_defense
+        echelon: battalion
+        count: 2
+        headcount: 400
+        designation: "해안방어포대"
+      - type: anti_ship_missile
+        echelon: battalion
+        count: 1
+        headcount: 150
+        designation: "대함미사일대대"
+      - type: mine_warfare
+        echelon: ship
+        count: 2
+        headcount: 80
+        designation: "기뢰부설함"
+
+# ── 지형 ─────────────────────────────────────────────
+terrain:
+  map_size_km: 40
+  types:
+    - { terrain: coastal, ratio: 0.40 }
+    - { terrain: ocean, ratio: 0.25 }
+    - { terrain: mountain, ratio: 0.20 }
+    - { terrain: forest, ratio: 0.10 }
+    - { terrain: urban, ratio: 0.05 }
+
+# ── 환경 조건 ────────────────────────────────────────
+environment:
+  fog_level: light
+  weather: clear
+  sea_state: 3               # 해상 상태 (Beaufort scale)
+  visibility_km: 15
+  time_of_day: daytime
+  tide: low                  # low | high | rising | falling
+
+# ── 특수 위협 ────────────────────────────────────────
+threats:
+  mine_threat: true          # 기뢰 위협
+  coastal_artillery: true    # 해안포 위협
+  anti_ship_missile: true    # 대함 미사일
+  submarine_threat: false
+
+# ── 학습 파라미터 ────────────────────────────────────
+training:
+  episodes: 800
+  max_steps: 60
+  reward_weights:
+    landing_success: 0.40
+    force_preservation: 0.30
+    fire_support_effectiveness: 0.20
+    civilian_protection: 0.10

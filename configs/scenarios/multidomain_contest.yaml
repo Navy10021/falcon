@@ -1,0 +1,169 @@
+# ============================================================
+# 시나리오: 다영역 경쟁 (Multi-Domain Contest)
+# 규모: 5개 도메인 동시 운용 (지상+해상+공중+사이버+우주)
+# 출처: 학술 연구용 합성 데이터
+# ============================================================
+
+scenario:
+  name: "다영역 경쟁"
+  name_en: "Multi-Domain Contest"
+  preset_fn: "scenario_multidomain_contest"  # scenario_presets.py 함수명
+  description: |
+    5개 작전 도메인(지상·해상·공중·사이버·우주) 동시 운용 시나리오.
+    ISR 자산, 우주 위성 지원, 사이버 작전, 전자전 포함.
+    다영역작전(MDO) 연구를 위한 핵심 시나리오.
+
+# ── 병력 규모 ──────────────────────────────────────────
+force:
+  blue:
+    total_headcount: 8000
+    units:
+      # 지상 (GROUND)
+      - type: infantry
+        domain: ground
+        echelon: brigade
+        count: 1
+        headcount: 3000
+        designation: "MDO 지상여단"
+        morale: 0.86
+        experience: 0.74
+      # 해상 (MARITIME)
+      - type: destroyer
+        domain: maritime
+        echelon: squadron
+        count: 2
+        headcount: 700
+        designation: "이지스 구축함 전대"
+      - type: submarine
+        domain: subsurface
+        echelon: ship
+        count: 1
+        headcount: 27
+        designation: "잠수함 (ISR/TLAM)"
+      # 공중 (AIR)
+      - type: fighter
+        domain: air
+        echelon: element
+        count: 3
+        headcount: 180
+        designation: "F-35A CAS 편대"
+      - type: isr_aircraft
+        domain: air
+        echelon: flight
+        count: 2
+        headcount: 60
+        designation: "ISR 편대"
+      # 사이버 (CYBER)
+      - type: cyber_unit
+        domain: cyber
+        echelon: battalion
+        count: 1
+        headcount: 200
+        designation: "사이버작전대대"
+      # 우주 (SPACE)
+      - type: space_asset
+        domain: space
+        echelon: battalion
+        count: 1
+        headcount: 50
+        designation: "위성통신·ISR 자산"
+      # EW
+      - type: electronic_warfare
+        domain: air
+        echelon: battalion
+        count: 1
+        headcount: 120
+        designation: "전자전대대"
+  red:
+    total_headcount: 7000
+    units:
+      - type: infantry
+        domain: ground
+        echelon: division
+        count: 1
+        headcount: 4000
+        designation: "적 A2AD 지상군"
+        morale: 0.76
+        experience: 0.66
+      - type: destroyer
+        domain: maritime
+        echelon: squadron
+        count: 2
+        headcount: 600
+        designation: "적 해군 전단"
+      - type: sam_battery
+        domain: air
+        echelon: brigade
+        count: 1
+        headcount: 300
+        designation: "A2AD 방공망"
+      - type: cyber_unit
+        domain: cyber
+        echelon: battalion
+        count: 1
+        headcount: 150
+        designation: "적 사이버전 부대"
+      - type: space_asset
+        domain: space
+        echelon: company
+        count: 1
+        headcount: 80
+        designation: "적 위성 재밍 자산"
+      - type: electronic_warfare
+        domain: air
+        echelon: regiment
+        count: 1
+        headcount: 200
+        designation: "적 전자전 연대"
+      - type: ballistic_missile
+        domain: ground
+        echelon: brigade
+        count: 1
+        headcount: 300
+        designation: "IRBM/MRBM 여단"
+
+# ── 지형 ─────────────────────────────────────────────
+terrain:
+  map_size_km: 150
+  types:
+    - { terrain: open, ratio: 0.25 }
+    - { terrain: ocean, ratio: 0.25 }
+    - { terrain: airspace, ratio: 0.25 }
+    - { terrain: cyberspace, ratio: 0.15 }  # 추상적 사이버 공간
+    - { terrain: mountain, ratio: 0.10 }
+
+# ── 환경 조건 ────────────────────────────────────────
+environment:
+  fog_level: heavy             # 다영역 — 복합 불확실성
+  weather: overcast
+  visibility_km: 10
+  time_of_day: daytime
+  gps_degradation: 0.30       # GPS 저하 (적 재밍)
+  comms_jamming: 0.20         # 통신 재밍 강도
+
+# ── 도메인별 활성화 ──────────────────────────────────
+domains:
+  ground: true
+  maritime: true
+  air: true
+  cyber: true
+  space: true
+  subsurface: true
+
+# ── 특수 위협 ────────────────────────────────────────
+threats:
+  a2ad_denial: true            # A2AD 거부 전략
+  cyber_attack: true           # 사이버 공격
+  satellite_jamming: true      # 위성 재밍
+  ballistic_missile: true
+  ew_jamming: true
+
+# ── 학습 파라미터 ────────────────────────────────────
+training:
+  episodes: 1200
+  max_steps: 100
+  reward_weights:
+    cross_domain_synergy: 0.30  # 도메인 간 시너지
+    a2ad_penetration: 0.25      # A2AD 돌파
+    force_preservation: 0.25
+    cyber_space_control: 0.20

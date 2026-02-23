@@ -1,0 +1,140 @@
+# ============================================================
+# 시나리오: 사이버·전자전 (Cyber-EW Warfare)
+# 규모: 비운동성 전장 — 사이버·전자전 특화
+# 출처: 학술 연구용 합성 데이터
+# ============================================================
+
+scenario:
+  name: "사이버·전자전"
+  name_en: "Cyber-EW Warfare"
+  preset_fn: "scenario_cyber_ew"          # scenario_presets.py 함수명
+  description: |
+    사이버 공격과 전자전이 주도하는 비운동성 전장 시나리오.
+    BLUE(사이버사령부 + 전자전부대 + 방어 지상군) vs
+    RED(사이버전·EW 특화부대 + 제한된 재래식 전력).
+    C2 시스템 교란, 통신 재밍, 전력망 공격, 사이버 방어 포함.
+
+# ── 병력 규모 ──────────────────────────────────────────
+force:
+  blue:
+    total_headcount: 2500
+    units:
+      - type: cyber_unit
+        domain: cyber
+        echelon: brigade
+        count: 1
+        headcount: 800
+        designation: "사이버사령부 여단"
+        morale: 0.88
+        experience: 0.82
+      - type: electronic_warfare
+        domain: air
+        echelon: regiment
+        count: 1
+        headcount: 400
+        designation: "전자전연대"
+      - type: signal
+        echelon: battalion
+        count: 2
+        headcount: 300
+        designation: "통신대대 (방어망)"
+      - type: infantry
+        echelon: regiment
+        count: 1
+        headcount: 800
+        designation: "방어 지상연대"
+        morale: 0.82
+        experience: 0.68
+      - type: isr_aircraft
+        domain: air
+        echelon: flight
+        count: 1
+        headcount: 40
+        designation: "SIGINT 수집기"
+      - type: space_asset
+        domain: space
+        echelon: company
+        count: 1
+        headcount: 60
+        designation: "위성 조기경보·통신"
+  red:
+    total_headcount: 2000
+    units:
+      - type: cyber_unit
+        domain: cyber
+        echelon: brigade
+        count: 1
+        headcount: 700
+        designation: "적 사이버전 여단"
+        morale: 0.78
+        experience: 0.75
+      - type: electronic_warfare
+        domain: air
+        echelon: regiment
+        count: 1
+        headcount: 350
+        designation: "적 EW 연대 (GPS·통신 재밍)"
+      - type: signal
+        echelon: battalion
+        count: 1
+        headcount: 200
+        designation: "적 C2 체계"
+      - type: infantry
+        echelon: brigade
+        count: 1
+        headcount: 600
+        designation: "적 재래식 지원여단"
+      - type: space_asset
+        domain: space
+        echelon: company
+        count: 1
+        headcount: 80
+        designation: "적 위성 재밍 자산"
+
+# ── 지형 ─────────────────────────────────────────────
+terrain:
+  map_size_km: 100
+  types:
+    - { terrain: cyberspace, ratio: 0.40 }  # 주 작전 공간
+    - { terrain: open, ratio: 0.30 }
+    - { terrain: urban, ratio: 0.20 }
+    - { terrain: airspace, ratio: 0.10 }
+
+# ── 환경 조건 ────────────────────────────────────────
+environment:
+  fog_level: maximum           # 전자전 환경 — 최대 불확실성
+  weather: clear
+  visibility_km: 10
+  gps_degradation: 0.70       # 강한 GPS 재밍
+  comms_jamming: 0.60         # 강한 통신 재밍
+  cyber_threat_level: critical  # low | moderate | high | critical
+
+# ── 사이버 공격 대상 ─────────────────────────────────
+cyber_targets:
+  blue_defense:
+    - "C2_network"
+    - "logistics_database"
+    - "power_grid"
+    - "comms_backbone"
+  red_attack:
+    - "gps_infrastructure"
+    - "radar_network"
+    - "early_warning_system"
+
+# ── 특수 위협 ────────────────────────────────────────
+threats:
+  gps_denial: true             # GPS 거부
+  comms_disruption: true       # 통신 교란
+  c2_attack: true              # C2 시스템 공격
+  power_grid_attack: false     # (학술 연구: 억제)
+  supply_chain_attack: false
+
+# ── 학습 파라미터 ────────────────────────────────────
+training:
+  episodes: 700
+  max_steps: 60
+  reward_weights:
+    cyber_defense: 0.35        # C2 시스템 방어
+    ew_control: 0.30           # 전자기스펙트럼 우세
+    comms_resilience: 0.25     # 통신 복원력
+    isr_collection: 0.10
