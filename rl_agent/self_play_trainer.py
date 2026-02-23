@@ -63,6 +63,38 @@ class EpisodeStats:
     phase: str = "A"
 
 
+@dataclass
+class PopulationMember:
+    """
+    League Self-Play PFSP 용 개체군 멤버.
+    에이전트 + 최근 매치 결과를 추적해 PFSP 선택 가중치를 계산한다.
+    """
+    agent: object          # BlueAgent | RedAgent
+    wins: int   = 0        # 이 멤버를 상대로 현재 주 에이전트가 이긴 횟수
+    losses: int = 0        # 진 횟수
+    draws: int  = 0        # 무승부
+
+    @property
+    def n_matches(self) -> int:
+        return self.wins + self.losses + self.draws
+
+    @property
+    def win_rate_vs_main(self) -> float:
+        """주 에이전트의 이 멤버에 대한 승률 (승률이 낮을수록 강적)"""
+        n = self.n_matches
+        return self.wins / n if n > 0 else 0.5
+
+    def pfsp_weight(self, alpha: float = 2.0) -> float:
+        """
+        PFSP 선택 가중치 (AlphaStar 방식).
+        win_rate ~ 0.5 (아슬아슬한 상대)에 가중치 최대.
+        f(p) = p^alpha * (1-p)^alpha  (beta 분포 밀도 비례)
+        alpha=2 → 승률 0.5에서 가중치 최대, 극단(0/1)에서 0
+        """
+        p = float(np.clip(self.win_rate_vs_main, 0.01, 0.99))
+        return (p ** alpha) * ((1 - p) ** alpha)
+
+
 class SelfPlayTrainer:
     """
     Blue vs Red Self-Play 학습기
@@ -100,12 +132,12 @@ class SelfPlayTrainer:
         self.blue_agent = BlueAgent()
         self.red_agent  = RedAgent()
 
-        # Population (Phase D용)
-        self.blue_population: List[BlueAgent] = [
-            BlueAgent() for _ in range(self.config.population_size)
+        # PFSP Population (Phase D: League Self-Play)
+        self.blue_population: List[PopulationMember] = [
+            PopulationMember(agent=BlueAgent()) for _ in range(self.config.population_size)
         ]
-        self.red_population: List[RedAgent] = [
-            RedAgent() for _ in range(self.config.population_size)
+        self.red_population: List[PopulationMember] = [
+            PopulationMember(agent=RedAgent()) for _ in range(self.config.population_size)
         ]
 
         # 통계 추적
@@ -179,6 +211,21 @@ class SelfPlayTrainer:
             targets[u.unit_id] = (tx, ty)
 
         return targets
+
+    @staticmethod
+    def _pfsp_select(population: "List[PopulationMember]") -> "PopulationMember":
+        """
+        Prioritized Fictitious Self-Play (PFSP) 가중 샘플링.
+        win_rate~0.5 인 상대(아슬아슬한 매치)를 더 자주 선택 → 전략 다양성 극대화.
+        모든 가중치가 0이면 균등 샘플링으로 폴백.
+        """
+        weights = np.array([m.pfsp_weight() for m in population], dtype=np.float64)
+        total = weights.sum()
+        if total < 1e-9:                        # 초기(매치 없음) → 균등 선택
+            return np.random.choice(population)  # type: ignore[arg-type]
+        probs = weights / total
+        idx = np.random.choice(len(population), p=probs)
+        return population[idx]
 
     def _get_current_phase(self, progress: float) -> str:
         cfg = self.config
@@ -441,16 +488,32 @@ class SelfPlayTrainer:
             progress = ep / cfg.total_episodes
             phase = self._get_current_phase(progress)
 
-            # Population Phase: 랜덤 에이전트 선택
+            # Population Phase: PFSP 가중 에이전트 선택
             if phase == "D":
-                blue = np.random.choice(self.blue_population)
-                red  = np.random.choice(self.red_population)
+                blue_member = self._pfsp_select(self.blue_population)
+                red_member  = self._pfsp_select(self.red_population)
+                blue = blue_member.agent
+                red  = red_member.agent
             else:
+                blue_member = red_member = None
                 blue = self.blue_agent
                 red  = self.red_agent
 
             # 에피소드 실행
             episode_stats = self.run_episode(ep, progress, blue, red, phase)
+
+            # PFSP 결과 업데이트 (Phase D)
+            if phase == "D" and blue_member is not None:
+                w = episode_stats.winner
+                if w == "blue_win":
+                    blue_member.wins   += 1
+                    red_member.losses  += 1
+                elif w == "red_win":
+                    blue_member.losses += 1
+                    red_member.wins    += 1
+                else:
+                    blue_member.draws  += 1
+                    red_member.draws   += 1
             self.stats.append(episode_stats)
             recent_winners.append(episode_stats.winner)
             if len(recent_winners) > 100:
@@ -459,10 +522,16 @@ class SelfPlayTrainer:
             # 업데이트
             update_counter += 1
             if update_counter >= cfg.update_interval:
-                if phase in ["A", "C", "D"]:
+                if phase in ["A", "C"]:
                     blue.update()
-                if phase in ["B", "C", "D"]:
+                if phase in ["B", "C"]:
                     red.update()
+                if phase == "D":
+                    # PFSP: 개체군 전체 업데이트
+                    for m in self.blue_population:
+                        m.agent.update()
+                    for m in self.red_population:
+                        m.agent.update()
                 update_counter = 0
 
             # Nash Gap 체크
@@ -504,6 +573,12 @@ class SelfPlayTrainer:
     def _compute_final_stats(self) -> Dict:
         recent = self.stats[-200:] if len(self.stats) >= 200 else self.stats
         resolved = [s for s in recent if s.winner in ("blue_win", "red_win")]
+
+        # PFSP 개체군 다양성: 멤버 간 승률 표준편차 (높을수록 다양한 전략)
+        pfsp_blue_wr = [m.win_rate_vs_main for m in self.blue_population if m.n_matches > 0]
+        pfsp_red_wr  = [m.win_rate_vs_main for m in self.red_population  if m.n_matches > 0]
+        pfsp_diversity = float(np.std(pfsp_blue_wr + pfsp_red_wr)) if pfsp_blue_wr else 0.0
+
         return {
             "total_episodes": len(self.stats),
             "blue_win_rate": sum(1 for s in recent if s.winner == "blue_win") / max(len(recent), 1),
@@ -516,6 +591,7 @@ class SelfPlayTrainer:
             "avg_force_reduction": np.mean([s.blue_force_reduction for s in recent]),
             "final_nash_gap": self.nash_gaps[-1] if self.nash_gaps else None,
             "converged": (self.nash_gaps[-1] < 0.05) if self.nash_gaps else False,
+            "pfsp_diversity": pfsp_diversity,   # 개체군 전략 다양성 지표
         }
 
 
