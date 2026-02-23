@@ -182,9 +182,11 @@ def train_phase1(args):
     from gnn_model.bayesian_hgt import BayesianHGT, prepare_graph_tensors, CombatGNNLoss
     from rl_agent.blue_agent import BlueAgent, build_state_vector, BlueActionSpace, PPOConfig
     from ontology.doctrine_encoder import DoctrineEncoder  # P3-5
+    from simulator.combat_dynamics import CombatDynamicsManager  # 단기: 역학 통합
 
     engine = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)  # P3-1
+    dynamics = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합 관리
     curriculum = CurriculumScheduler()
     gnn = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim = torch.optim.Adam(gnn.parameters(), lr=1e-3)
@@ -213,6 +215,7 @@ def train_phase1(args):
             n_red=np.random.randint(4, 9),
             seed=args.seed + ep
         )
+        dynamics.initialize_from_kg(kg)  # 단기: 에피소드별 보급 상태 초기화
         initial_blue_hc = sum(u.headcount for u in kg.units.values()
                               if u.alignment == ForceAlignment.BLUE)
 
@@ -266,6 +269,9 @@ def train_phase1(args):
             step_result = engine.run_step(kg, action_pairs=action_pairs)
             done = (step_result.mission_status != "ongoing")
 
+            # 단기: CombatDynamicsManager — 탄약/연료 소모, EMS 업데이트 (BDA는 MixedEngine 전용)
+            dynamics.step_update(kg, {})
+
             # P3-2: GNN 노드 특성 동기화 (변경된 유닛 상태 → 그래프 반영)
             kg.update_node_features()
 
@@ -285,6 +291,8 @@ def train_phase1(args):
                 initial_force_size=initial_blue_hc,
                 doctrine_score=compliance.total_score,
             )
+            # 단기: 보급 패널티 — 탄약/연료 부족 시 RL 보상 감소
+            reward += dynamics.get_supply_penalty(ForceAlignment.BLUE, kg) * 0.5
             prev_blue_hc = step_result.blue_total_headcount
             episode_reward += reward
 
@@ -350,12 +358,22 @@ def train_phase2(args):
 
     from rl_agent.self_play_trainer import SelfPlayTrainer, SelfPlayConfig
 
+    # N-4: Phase 1에서 저장된 GNN 체크포인트를 Phase 2에 전달
+    #       → SelfPlayTrainer가 동일한 GNN으로 상태 벡터를 생성해 Phase 간 환경 일관성 확보
+    _gnn_ckpt = os.path.join(args.checkpoint_dir, "gnn_phase1_final.pt")
+    _gnn_ckpt_path = _gnn_ckpt if os.path.isfile(_gnn_ckpt) else None
+    if _gnn_ckpt_path:
+        logger.info("  [N-4] Phase 1 GNN 체크포인트 로드: %s", _gnn_ckpt_path)
+    else:
+        logger.warning("  [N-4] Phase 1 GNN 체크포인트 없음 (%s) → GNN 없이 Self-Play 진행", _gnn_ckpt)
+
     config = SelfPlayConfig(
         total_episodes=args.episodes,
         log_interval=args.log_interval,
         save_interval=args.save_interval,
         checkpoint_dir=args.checkpoint_dir,
-        nash_check_interval=max(50, args.episodes // 20)
+        nash_check_interval=max(50, args.episodes // 20),
+        gnn_checkpoint_path=_gnn_ckpt_path,   # N-4
     )
     trainer = SelfPlayTrainer(config)
     final_stats = trainer.train()
@@ -486,6 +504,7 @@ def train_phase4(args):
     from ontology.doctrine_encoder import DoctrineEncoder
     from hitl.preference_reward_adapter import PreferenceRewardAdapter
     from rl_agent.inverse_rl import IRLRewardLoader  # P3-4
+    from simulator.combat_dynamics import CombatDynamicsManager  # 단기: 역학 통합
 
     # 선호도 어댑터 로드
     if args.preference_model and os.path.isfile(args.preference_model):
@@ -506,6 +525,7 @@ def train_phase4(args):
 
     engine          = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)
+    dynamics        = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합
     curriculum      = CurriculumScheduler()
     gnn             = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim       = torch.optim.Adam(gnn.parameters(), lr=1e-3)
@@ -535,6 +555,7 @@ def train_phase4(args):
             n_red=np.random.randint(4, 9),
             seed=args.seed + ep,
         )
+        dynamics.initialize_from_kg(kg)  # 단기: 에피소드별 보급 상태 초기화
         initial_blue_hc = sum(u.headcount for u in kg.units.values()
                               if u.alignment == ForceAlignment.BLUE)
         prev_blue_hc    = initial_blue_hc
@@ -574,6 +595,9 @@ def train_phase4(args):
             step_result = engine.run_step(kg, action_pairs=action_pairs)
             done = (step_result.mission_status != "ongoing")
 
+            # 단기: CombatDynamicsManager — 탄약/연료 소모, EMS 업데이트
+            dynamics.step_update(kg, {})
+
             kg.update_node_features()
 
             # 교리 평가
@@ -602,9 +626,16 @@ def train_phase4(args):
                                     * avg_unc * force_reduction * 0.05
                                     if avg_unc > 0.5 and force_reduction > 0 else 0.0)
 
-            # P3-4: IRL 보너스 (교리 기반 행동 강화)
-            irl_bonus = irl_loader.compute_irl_bonus(kg, step_result, maneuver_result) \
-                        if irl_loader is not None else 0.0
+            # P3-4 + N-3: IRL 보너스 — step_t/max_steps로 time_pressure 동적 계산
+            irl_bonus = irl_loader.compute_irl_bonus(
+                kg, step_result, maneuver_result,
+                step_t=step_t, max_steps=50,
+            ) if irl_loader is not None else 0.0
+
+            # N-5: survival_bonus 이중 스케일 방지 — raw 최대값으로 클리핑
+            # W_FORCE_RATIO(=2.0) × ratio_max(=1.0) = 2.0이 상한이므로 해당 값으로 cap
+            _SURVIVAL_BONUS_CAP = blue_agent._W_FORCE_RATIO
+            survival_bonus_clamped = min(survival_bonus_raw, _SURVIVAL_BONUS_CAP)
 
             # 선호도 스케일 적용 (IRL 보너스는 enemy_damage에 합산)
             reward = adapter.compute_scaled_reward(
@@ -612,11 +643,13 @@ def train_phase4(args):
                 win_reward=win_reward_raw,
                 force_reward=force_reward_raw,
                 casualty_penalty=casualty_penalty_raw,
-                survival_bonus=survival_bonus_raw,
+                survival_bonus=survival_bonus_clamped,   # N-5: clamped
                 enemy_damage=enemy_dmg_raw + irl_bonus,
                 doctrine_bonus=doctrine_bonus_raw,
                 uncertainty_penalty=unc_pen_raw,
             )
+            # 단기: 보급 패널티 (선호도 어댑터와 분리 — 물리적 제약, [-0.5, 0])
+            reward += dynamics.get_supply_penalty(ForceAlignment.BLUE, kg) * 0.5
             prev_blue_hc    = step_result.blue_total_headcount
             episode_reward += reward
             blue_agent.buffer.add(state, action, reward, log_prob, value, done, avg_unc)

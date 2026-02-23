@@ -36,5 +36,10 @@ def main():
     print("✅ numerical stability tests passed")
 
 
+def test_numerical_stability():
+    """pytest: GNN/BlueAgent 수치 안정성 검증."""
+    main()
+
+
 if __name__ == "__main__":
     main()

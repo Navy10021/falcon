@@ -17,6 +17,51 @@ import numpy as np
 from tqdm import tqdm
 
 
+def _build_mc_action_pairs(kg, blue_action: int) -> Optional[list]:
+    """
+    N-1: 에이전트 행동 → 교전 쌍 변환 (Monte Carlo 평가용).
+
+    BlueActionSpace 인덱스에 따라 공격 대상 우선순위(약한/강한/균형)를 결정한다.
+    train.py._build_blue_action_pairs()와 동일한 로직 — 평가-학습 환경 일관성 확보.
+    """
+    from ontology.combat_schema import ForceAlignment, UnitStatus
+
+    # BlueActionSpace 상수 (blue_agent.py 와 동기화)
+    ADVANCE = 1; FLANK = 5; REINFORCE = 0; SUPPORT = 4; WITHDRAW = 2
+
+    blue_units = [u for u in kg.units.values()
+                  if u.alignment == ForceAlignment.BLUE
+                  and u.status != UnitStatus.DESTROYED
+                  and u.headcount > 0]
+    red_units  = [u for u in kg.units.values()
+                  if u.alignment == ForceAlignment.RED
+                  and u.status != UnitStatus.DESTROYED
+                  and u.headcount > 0]
+    if not blue_units or not red_units:
+        return None
+
+    def pick_targets(units, mode):
+        if mode == "weakest":
+            return sorted(units, key=lambda u: u.headcount)
+        if mode == "strongest":
+            return sorted(units, key=lambda u: u.combat_power, reverse=True)
+        return sorted(units, key=lambda u: u.headcount, reverse=True)
+
+    mode_map = {
+        ADVANCE: "weakest", FLANK: "weakest",
+        REINFORCE: "strongest", SUPPORT: "strongest",
+    }
+    mode = mode_map.get(int(blue_action), "balanced")
+    targets = pick_targets(red_units, mode)
+
+    attackers = blue_units
+    if int(blue_action) == WITHDRAW:
+        attackers = blue_units[:max(1, len(blue_units) // 2)]
+
+    return [(att.unit_id, targets[i % len(targets)].unit_id)
+            for i, att in enumerate(attackers)]
+
+
 def _mc_run_worker(args: Dict) -> "MCResult":
     """
     단일 Monte Carlo 런 실행 — ProcessPoolExecutor 워커용 최상위 함수.
@@ -73,9 +118,11 @@ def _mc_run_worker(args: Dict) -> "MCResult":
         else:
             state = build_state_vector(kg)
 
-        agent.select_action(state, deterministic=True)
+        # N-1: select_action 결과를 action_pairs로 변환해 run_step에 반영
+        action, _, _ = agent.select_action(state, deterministic=True)
+        action_pairs = _build_mc_action_pairs(kg, action)
 
-        step = engine.run_step(kg)
+        step = engine.run_step(kg, action_pairs=action_pairs)
         blue_casualties += step.blue_total_casualties
         red_casualties  += step.red_total_casualties
         n_steps += 1
@@ -224,9 +271,11 @@ class MonteCarloEvaluator:
                 else:
                     state = build_state_vector(kg)
 
-                agent.select_action(state, deterministic=True)
+                # N-1: select_action 결과를 action_pairs로 변환해 run_step에 반영
+                action, _, _ = agent.select_action(state, deterministic=True)
+                action_pairs = _build_mc_action_pairs(kg, action)
 
-                step = engine.run_step(kg)
+                step = engine.run_step(kg, action_pairs=action_pairs)
                 blue_casualties += step.blue_total_casualties
                 red_casualties += step.red_total_casualties
                 n_steps += 1

@@ -275,3 +275,13 @@ else:
         if not ok:
             print(f"   ❌ {name}: {detail}")
 print("="*55)
+
+
+# ── pytest entry point ────────────────────────────────────────
+def test_tier3_all():
+    """pytest: TIER 3 통합 검증 (계층적RL/LeagueSelfPlay/실시간재계획/멀티도메인)."""
+    failed = [(name, detail) for name, ok, detail in results if not ok]
+    assert not failed, (
+        "TIER 3 failures:\n"
+        + "\n".join(f"  \u274c {n}: {d}" for n, d in failed)
+    )

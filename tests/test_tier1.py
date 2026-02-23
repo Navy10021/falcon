@@ -203,3 +203,13 @@ else:
         if not ok:
             print(f"   ❌ {name}: {detail}")
 print("="*55)
+
+
+# ── pytest entry point ────────────────────────────────────────
+def test_tier1_all():
+    """pytest: TIER 1 통합 검증 (동적자원/혼합란체스터/Temperature/MCPareto)."""
+    failed = [(name, detail) for name, ok, detail in results if not ok]
+    assert not failed, (
+        "TIER 1 failures:\n"
+        + "\n".join(f"  \u274c {n}: {d}" for n, d in failed)
+    )

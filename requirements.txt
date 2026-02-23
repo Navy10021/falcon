@@ -27,7 +27,7 @@ tqdm>=4.65.0
 tensorboard>=2.13.0
 rich>=13.0.0
 
-# 개발 도구 (Dev Tools) — optional
-# pytest>=7.0.0
+# 개발/테스트 도구 (Dev/Test Tools)
+pytest>=7.4.0
 # black>=23.0.0
 # mypy>=1.0.0

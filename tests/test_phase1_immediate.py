@@ -188,3 +188,13 @@ else:
         if not ok:
             print(f"   ❌ {name}: {detail}")
 print("="*55)
+
+
+# ── pytest entry point ────────────────────────────────────────
+def test_phase1_immediate_all():
+    """pytest: Phase 1 즉시 검증 (대시보드/자연어인터페이스)."""
+    failed = [(name, detail) for name, ok, detail in results if not ok]
+    assert not failed, (
+        "Phase 1 failures:\n"
+        + "\n".join(f"  \u274c {n}: {d}" for n, d in failed)
+    )
