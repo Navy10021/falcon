@@ -173,6 +173,10 @@ class MCEvaluationReport:
     strategy_robustness: float             # [0, 1] 높을수록 강건
     failure_scenarios: List[Dict]          # 실패 시나리오 분석
     vulnerability_analysis: Dict[str, float]
+    # CVaR 극단 시나리오 강건성 (장기: CVaR 기반 위험 지표)
+    cvar_05: float = 0.0    # 최악 5% 시나리오의 평균 사상자 (Conditional Value at Risk)
+    cvar_10: float = 0.0    # 최악 10% 시나리오의 평균 사상자
+    cvar_robustness: float = 0.0  # 1 - cvar_10 / max_casualties (0→1, 높을수록 강건)
 
 
 class MonteCarloEvaluator:
@@ -342,6 +346,20 @@ class MonteCarloEvaluator:
         results.sort(key=lambda r: r.run_id)
         return self._compute_report(results)
 
+    @staticmethod
+    def _compute_cvar(values: np.ndarray, alpha: float) -> float:
+        """
+        CVaR (Conditional Value at Risk) 계산.
+        alpha 분위수를 초과하는 상위 (1-alpha)% 값들의 평균.
+        여기서는 사상자 기준 최악 alpha% 시나리오 평균을 반환한다.
+        예) alpha=0.05 → 최악 5% 시나리오의 평균 사상자.
+        """
+        if len(values) == 0:
+            return 0.0
+        threshold = np.quantile(values, 1.0 - alpha)
+        tail = values[values >= threshold]
+        return float(tail.mean()) if len(tail) > 0 else float(values.max())
+
     def _compute_report(self, results: List[MCResult]) -> MCEvaluationReport:
         """통계 보고서 계산"""
         n = len(results)
@@ -384,6 +402,12 @@ class MonteCarloEvaluator:
         win_array = np.array([1 if r.winner == "blue_win" else 0 for r in results])
         robustness = float(blue_win_rate * (1 - np.std(win_array)))
 
+        # CVaR 극단 시나리오 강건성 지표
+        cvar_05 = self._compute_cvar(casualties, alpha=0.05)
+        cvar_10 = self._compute_cvar(casualties, alpha=0.10)
+        max_cas  = float(casualties.max()) if len(casualties) > 0 else 1.0
+        cvar_robustness = float(1.0 - cvar_10 / max(max_cas, 1.0))
+
         return MCEvaluationReport(
             n_runs=n,
             blue_win_rate=blue_win_rate,
@@ -396,7 +420,10 @@ class MonteCarloEvaluator:
             best_case_casualties=int(casualties.min()),
             strategy_robustness=robustness,
             failure_scenarios=failure_scenarios,
-            vulnerability_analysis=vulnerability
+            vulnerability_analysis=vulnerability,
+            cvar_05=cvar_05,
+            cvar_10=cvar_10,
+            cvar_robustness=cvar_robustness,
         )
 
     def _analyze_vulnerability(self, results: List[MCResult]) -> Dict[str, float]:
@@ -429,9 +456,12 @@ class MonteCarloEvaluator:
         print(f"  병력 절감율:  {report.avg_force_reduction:.1%}")
         print(f"  평균 소요시간: {report.avg_steps:.1f} 스텝")
         print(f"  전략 강건성:  {report.strategy_robustness:.4f}")
-        print(f"\n⚠️ 극단값:")
+        print(f"\n⚠️ 극단값 및 CVaR 위험 지표:")
         print(f"  최악 사상자:  {report.worst_case_casualties}명")
         print(f"  최선 사상자:  {report.best_case_casualties}명")
+        print(f"  CVaR (최악 5%): {report.cvar_05:.1f}명 평균 사상자")
+        print(f"  CVaR (최악 10%): {report.cvar_10:.1f}명 평균 사상자")
+        print(f"  CVaR 강건성: {report.cvar_robustness:.4f}  (1=완전강건, 0=극단적 취약)")
         print(f"\n🔍 취약점 분석 (병력 비율별 승률):")
         for k, v in sorted(report.vulnerability_analysis.items()):
             ratio_val = k.replace("ratio_", "")

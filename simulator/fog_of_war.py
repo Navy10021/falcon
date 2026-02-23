@@ -83,11 +83,18 @@ class FogOfWarFilter:
         observed_kg = CombatKnowledgeGraph()
         uncertainty_map: Dict[str, float] = {}
 
-        # 관측자 유닛 위치 수집
-        observer_positions = [
+        # 관측자 유닛 위치 수집 → numpy 배열로 사전 빌드 (O(N²) Python 루프 → O(N) 벡터화)
+        obs_pos_list = [
             u.position for u in true_kg.units.values()
             if u.alignment == observer_alignment and u.status != UnitStatus.DESTROYED
         ]
+        if obs_pos_list:
+            # shape: [M, 3]  (M = 관측자 수)
+            obs_pos_arr = np.array(
+                [[p.x, p.y, p.z] for p in obs_pos_list], dtype=np.float32
+            )
+        else:
+            obs_pos_arr = np.empty((0, 3), dtype=np.float32)
 
         # 지형 정보는 완전 관측 (지도 정보)
         for cell in true_kg.terrain_cells.values():
@@ -100,8 +107,8 @@ class FogOfWarFilter:
                 uncertainty_map[uid] = 0.0
                 continue
 
-            # 적군: Fog of War 적용
-            if not self._is_detectable(true_unit, observer_positions):
+            # 적군: Fog of War 적용 (벡터화된 거리 계산 사용)
+            if not self._is_detectable(true_unit, obs_pos_arr):
                 # 탐지 불가 → 관측 제외
                 uncertainty_map[uid] = 1.0
                 continue
@@ -123,13 +130,22 @@ class FogOfWarFilter:
 
         return observed_kg, uncertainty_map
 
-    def _is_detectable(self, unit: Unit, observer_positions: list) -> bool:
-        """유닛 탐지 가능 여부 판단"""
-        if not observer_positions:
+    def _is_detectable(self, unit: Unit, obs_pos_arr: np.ndarray) -> bool:
+        """
+        유닛 탐지 가능 여부 판단.
+        obs_pos_arr: shape [M, 3] numpy 배열 (관측자 위치 사전 계산).
+        O(N²) Python 루프 대신 numpy 벡터화로 O(M) 연산.
+        """
+        if obs_pos_arr.shape[0] == 0:
             return False
 
-        # 관측 반경 내 여부
-        min_dist = min(unit.position.distance_to(p) for p in observer_positions)
+        # 벡터화 거리 계산: [M, 3] - [3] → [M]
+        unit_pos = np.array(
+            [unit.position.x, unit.position.y, unit.position.z], dtype=np.float32
+        )
+        diffs    = obs_pos_arr - unit_pos        # [M, 3]
+        min_dist = float(np.sqrt((diffs ** 2).sum(axis=1)).min())
+
         if min_dist > self.observation_radius_km:
             return False
 
@@ -137,7 +153,7 @@ class FogOfWarFilter:
         distance_factor = 1.0 - (min_dist / self.observation_radius_km) * 0.5
         base_prob = self.noise.detection_prob * distance_factor
 
-        return self.rng.random() < base_prob
+        return bool(self.rng.random() < base_prob)
 
     def _apply_noise(self, true_unit: Unit) -> Tuple[Unit, float]:
         """관측 노이즈 적용 → (노이즈 유닛, 불확실성 점수)"""
