@@ -183,10 +183,12 @@ def train_phase1(args):
     from rl_agent.blue_agent import BlueAgent, build_state_vector, BlueActionSpace, PPOConfig
     from ontology.doctrine_encoder import DoctrineEncoder  # P3-5
     from simulator.combat_dynamics import CombatDynamicsManager  # 단기: 역학 통합
+    from ontology.multidomain import MultiDomainAnalyzer          # 중기: 멀티도메인 분석
 
     engine = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)  # P3-1
-    dynamics = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합 관리
+    dynamics    = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합 관리
+    md_analyzer = MultiDomainAnalyzer(seed=args.seed)    # 중기: 공-해-지 도메인 상태 추적
     curriculum = CurriculumScheduler()
     gnn = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim = torch.optim.Adam(gnn.parameters(), lr=1e-3)
@@ -210,11 +212,15 @@ def train_phase1(args):
         fog_level, fog_desc = curriculum.update(progress)
         fog_filter = FogOfWarFilter(fog_level, seed=ep)
 
-        kg = ScenarioFactory.create_standard_scenario(
-            n_blue=np.random.randint(5, 12),
-            n_red=np.random.randint(4, 9),
-            seed=args.seed + ep
-        )
+        # 중기: 20% 확률로 공-해-지 합동 시나리오 사용 (ep % 5 == 0)
+        if ep % 5 == 0:
+            kg = ScenarioFactory.create_joint_scenario(seed=args.seed + ep)
+        else:
+            kg = ScenarioFactory.create_standard_scenario(
+                n_blue=np.random.randint(5, 12),
+                n_red=np.random.randint(4, 9),
+                seed=args.seed + ep,
+            )
         dynamics.initialize_from_kg(kg)  # 단기: 에피소드별 보급 상태 초기화
         initial_blue_hc = sum(u.headcount for u in kg.units.values()
                               if u.alignment == ForceAlignment.BLUE)
@@ -250,6 +256,11 @@ def train_phase1(args):
             ], dtype=np.float32)
             gnn_ext = np.nan_to_num(gnn_ext, nan=0.0, posinf=10.0, neginf=-10.0)
             gnn_ext = np.clip(gnn_ext, -10.0, 10.0).astype(np.float32)
+
+            # 중기: MultiDomainAnalyzer — EW 우세도 반영 GNN 불확실성 증폭
+            md_state     = md_analyzer.compute_multidomain_state(obs_kg)
+            gnn_unc_mult = md_analyzer.get_uncertainty_multiplier(md_state)
+            gnn_ext      = np.clip(gnn_ext * gnn_unc_mult, -10.0, 10.0).astype(np.float32)
 
             # PPO 상태
             state = build_state_vector(obs_kg, gnn_extension=gnn_ext,
@@ -393,11 +404,18 @@ def train_phase3(args):
     from ontology.combat_schema import ScenarioFactory
     from hitl.pareto_generator import ParetoStrategyGenerator, CommanderConstraints
     from hitl.preference_learner import CommanderPreferenceLearner, SelectionRecord
+    from hitl.mc_pareto_validator import MCParetoValidator  # 중기: 실시뮬레이션 검증
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
-    generator = ParetoStrategyGenerator(n_candidates=5)
-    learner = CommanderPreferenceLearner(commander_id="phase3_commander")
+    generator  = ParetoStrategyGenerator(n_candidates=5)
+    learner    = CommanderPreferenceLearner(commander_id="phase3_commander")
+    # 중기: 에피소드당 빠른 MC 검증 (sims 수는 총 에피소드에 따라 조정)
+    _n_mc_sims = max(5, min(20, args.episodes // 20))
+    mc_validator = MCParetoValidator(
+        n_simulations=_n_mc_sims, max_steps_per_sim=20, seed=args.seed
+    )
+    logger.info("  [중기] MCParetoValidator 활성화: %d sims/후보", _n_mc_sims)
     phase3_stats = {"episodes": args.episodes, "all_violated_episodes": 0}
 
     for ep in range(args.episodes):
@@ -418,7 +436,18 @@ def train_phase3(args):
         options = generator.generate(kg, constraints=constraints)
         if generator.last_generation_all_violated:
             phase3_stats["all_violated_episodes"] += 1
-        ranked_options = learner.get_personalized_ranking(options)
+
+        # 중기: MC 실시뮬레이션으로 후보 검증 → 휴리스틱 수치를 실측값으로 대체
+        try:
+            validated = mc_validator.validate_all(
+                options, kg, constraints, verbose=False
+            )
+            # 검증 통과 후보 우선 사용, 없으면 원본 fallback
+            mc_options = [v.original for v in validated if v.validation_passed] or options
+        except Exception:
+            mc_options = options  # 검증 실패 시 원본 후보 유지
+
+        ranked_options = learner.get_personalized_ranking(mc_options)
 
         ai_recommended = ranked_options[0]
         # 모의 HITL 채택: 기본 70%는 AI 추천 수용, 30%는 차선책 선택
@@ -505,6 +534,7 @@ def train_phase4(args):
     from hitl.preference_reward_adapter import PreferenceRewardAdapter
     from rl_agent.inverse_rl import IRLRewardLoader  # P3-4
     from simulator.combat_dynamics import CombatDynamicsManager  # 단기: 역학 통합
+    from ontology.multidomain import MultiDomainAnalyzer          # 중기: 멀티도메인 분석
 
     # 선호도 어댑터 로드
     if args.preference_model and os.path.isfile(args.preference_model):
@@ -526,6 +556,7 @@ def train_phase4(args):
     engine          = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)
     dynamics        = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합
+    md_analyzer     = MultiDomainAnalyzer(seed=args.seed)    # 중기: 공-해-지 도메인 상태 추적
     curriculum      = CurriculumScheduler()
     gnn             = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim       = torch.optim.Adam(gnn.parameters(), lr=1e-3)
@@ -550,11 +581,15 @@ def train_phase4(args):
         fog_level, _ = curriculum.update(progress)
         fog_filter   = FogOfWarFilter(fog_level, seed=ep)
 
-        kg = ScenarioFactory.create_standard_scenario(
-            n_blue=np.random.randint(5, 12),
-            n_red=np.random.randint(4, 9),
-            seed=args.seed + ep,
-        )
+        # 중기: 20% 확률로 공-해-지 합동 시나리오 사용 (ep % 5 == 0)
+        if ep % 5 == 0:
+            kg = ScenarioFactory.create_joint_scenario(seed=args.seed + ep)
+        else:
+            kg = ScenarioFactory.create_standard_scenario(
+                n_blue=np.random.randint(5, 12),
+                n_red=np.random.randint(4, 9),
+                seed=args.seed + ep,
+            )
         dynamics.initialize_from_kg(kg)  # 단기: 에피소드별 보급 상태 초기화
         initial_blue_hc = sum(u.headcount for u in kg.units.values()
                               if u.alignment == ForceAlignment.BLUE)
@@ -578,6 +613,11 @@ def train_phase4(args):
                 gnn_out["aleatoric_uncertainty"].item(),
             ], dtype=np.float32)
             gnn_ext = np.clip(np.nan_to_num(gnn_ext, nan=0.0, posinf=10.0, neginf=-10.0), -10.0, 10.0)
+
+            # 중기: MultiDomainAnalyzer — EW 우세도 반영 GNN 불확실성 증폭
+            md_state     = md_analyzer.compute_multidomain_state(obs_kg)
+            gnn_unc_mult = md_analyzer.get_uncertainty_multiplier(md_state)
+            gnn_ext      = np.clip(gnn_ext * gnn_unc_mult, -10.0, 10.0).astype(np.float32)
 
             state = build_state_vector(obs_kg, gnn_extension=gnn_ext,
                                        uncertainty_map=uncertainty_map)

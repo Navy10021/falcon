@@ -101,6 +101,88 @@ class NumpyUnitActor:
         return int(np.argmax(logits))
 
 
+# ──────────────────────────────────────────────
+# PyTorch 기반 학습 가능 Actor / Critic
+# ──────────────────────────────────────────────
+
+if TORCH_AVAILABLE:
+    import torch.nn.functional as _F  # noqa: E402
+
+    class TorchUnitActor(nn.Module):
+        """
+        단일 유닛용 학습 가능 Actor (torch.nn.Module).
+        NumpyUnitActor 대비 실제 PPO gradient 업데이트 지원.
+        유닛 유형 간 파라미터 공유 가능.
+        """
+
+        def __init__(self, obs_dim: int = UNIT_OBS_DIM, n_actions: int = N_ACTIONS,
+                     hidden_dim: int = 64):
+            super().__init__()
+            self.n_actions = n_actions
+            self.net = nn.Sequential(
+                nn.Linear(obs_dim, hidden_dim), nn.GELU(),
+                nn.Linear(hidden_dim, hidden_dim), nn.GELU(),
+                nn.Linear(hidden_dim, n_actions),
+            )
+
+        def forward(self, obs: torch.Tensor,
+                    action_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+            logits = self.net(obs)
+            if action_mask is not None:
+                logits = logits.masked_fill(~action_mask, -1e9)
+            return logits
+
+        def select_action(
+            self, obs: np.ndarray,
+            action_mask: Optional[np.ndarray] = None
+        ) -> Tuple[int, float]:
+            obs_t  = torch.from_numpy(obs).float()
+            mask_t = torch.from_numpy(action_mask) if action_mask is not None else None
+            with torch.no_grad():
+                dist = torch.distributions.Categorical(
+                    logits=self.forward(obs_t, mask_t))
+                action = dist.sample()
+            return int(action.item()), float(dist.log_prob(action).item())
+
+        def greedy_action(
+            self, obs: np.ndarray,
+            action_mask: Optional[np.ndarray] = None
+        ) -> int:
+            obs_t  = torch.from_numpy(obs).float()
+            mask_t = torch.from_numpy(action_mask) if action_mask is not None else None
+            with torch.no_grad():
+                return int(self.forward(obs_t, mask_t).argmax().item())
+
+        def evaluate_actions(
+            self,
+            obs_batch: torch.Tensor,
+            actions_batch: torch.Tensor,
+            masks_batch: Optional[torch.Tensor] = None,
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+            """PPO 업데이트용 (log_prob, entropy) 계산"""
+            dist = torch.distributions.Categorical(
+                logits=self.forward(obs_batch, masks_batch))
+            return dist.log_prob(actions_batch), dist.entropy()
+
+    class TorchCentralizedCritic(nn.Module):
+        """CTDE 중앙화된 Critic — 전역 상태 → 가치 함수 (backprop 가능)."""
+
+        def __init__(self, state_dim: int = GLOBAL_STATE_DIM, hidden_dim: int = 128):
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Linear(state_dim, hidden_dim), nn.GELU(),
+                nn.Linear(hidden_dim, hidden_dim), nn.GELU(),
+                nn.Linear(hidden_dim, 1),
+            )
+
+        def forward(self, state: torch.Tensor) -> torch.Tensor:
+            return self.net(state).squeeze(-1)
+
+        def value(self, global_state: np.ndarray) -> float:
+            with torch.no_grad():
+                return float(self.forward(torch.from_numpy(global_state).float()).item())
+
+
 class NumpyCentralizedCritic:
     """
     중앙화된 Critic (전역 상태 → 가치 함수)
@@ -160,12 +242,28 @@ class MAPPOManager:
 
     def __init__(self, seed: int = 0):
         self.seed = seed
-        # 유닛 유형별 Actor (파라미터 공유)
-        self.type_actors: Dict[str, NumpyUnitActor] = {
-            unit_type: NumpyUnitActor(seed=seed + i)
-            for i, unit_type in enumerate(UNIT_ACTION_MASKS.keys())
-        }
-        self.critic = NumpyCentralizedCritic(seed=seed + 100)
+        if TORCH_AVAILABLE:
+            torch.manual_seed(seed)
+            # Torch 기반 Actor — 유닛 유형별 파라미터 공유 (실제 gradient 학습)
+            self.type_actors: Dict[str, "TorchUnitActor"] = {  # type: ignore[assignment]
+                unit_type: TorchUnitActor()
+                for unit_type in UNIT_ACTION_MASKS.keys()
+            }
+            self.critic: "TorchCentralizedCritic" = TorchCentralizedCritic()  # type: ignore[assignment]
+            # 통합 옵티마이저 (전체 Actor 파라미터 + Critic)
+            _actor_params = [p for a in self.type_actors.values() for p in a.parameters()]
+            self.actor_optimizer: Optional[torch.optim.Adam] = torch.optim.Adam(
+                _actor_params, lr=3e-4)
+            self.critic_optimizer: Optional[torch.optim.Adam] = torch.optim.Adam(
+                self.critic.parameters(), lr=1e-3)
+        else:
+            self.type_actors = {
+                unit_type: NumpyUnitActor(seed=seed + i)  # type: ignore[assignment]
+                for i, unit_type in enumerate(UNIT_ACTION_MASKS.keys())
+            }
+            self.critic = NumpyCentralizedCritic(seed=seed + 100)  # type: ignore[assignment]
+            self.actor_optimizer = None
+            self.critic_optimizer = None
         self.buffers: Dict[str, List[UnitTransition]] = {}
         self.episode_count = 0
 
@@ -266,11 +364,12 @@ class MAPPOManager:
             actor = self.type_actors.get(unit.unit_type.value,
                                           list(self.type_actors.values())[0])
 
+            # TorchUnitActor / NumpyUnitActor 공통 인터페이스
             if deterministic:
-                action = actor.greedy_action(unit_obs.obs_vector, unit_obs.action_mask)
+                action   = actor.greedy_action(unit_obs.obs_vector, unit_obs.action_mask)
                 log_prob = 0.0
             else:
-                action, log_prob = actor.sample_action(
+                action, log_prob = actor.select_action(
                     unit_obs.obs_vector, unit_obs.action_mask
                 )
 
@@ -360,6 +459,83 @@ class MAPPOManager:
                 "allowed_actions": [ACTION_NAMES[a] for a in allowed],
             }
         return stats
+
+    def update(
+        self,
+        clip_eps: float = 0.2,
+        value_coef: float = 0.5,
+        entropy_coef: float = 0.01,
+        n_epochs: int = 4,
+        gamma: float = 0.99,
+    ) -> Dict:
+        """
+        PPO gradient 업데이트 (TORCH_AVAILABLE 시에만 실행).
+
+        전체 버퍼의 전환 데이터를 통합하여 n_epochs 동안
+        clip-PPO로 Actor / Critic 파라미터를 갱신한다.
+        """
+        if not TORCH_AVAILABLE or not self.buffers:
+            return {}
+
+        all_trans = [t for buf in self.buffers.values() for t in buf]
+        if not all_trans:
+            return {}
+
+        obs_t    = torch.tensor(np.stack([t.observation   for t in all_trans]), dtype=torch.float32)
+        acts_t   = torch.tensor([t.action                 for t in all_trans], dtype=torch.long)
+        old_lp_t = torch.tensor([t.log_prob               for t in all_trans], dtype=torch.float32)
+        masks_t  = torch.tensor(np.stack([t.action_mask   for t in all_trans]), dtype=torch.bool)
+
+        rets_t = self._compute_returns(all_trans, gamma)
+        vals_t = torch.tensor([t.global_value for t in all_trans], dtype=torch.float32)
+        advs_t = rets_t - vals_t
+        advs_t = (advs_t - advs_t.mean()) / (advs_t.std() + 1e-8)
+
+        # 공통 Actor (유닛 유형별 구분은 Phase 2 작업으로 연기)
+        actor = list(self.type_actors.values())[0]
+
+        actor_losses, critic_losses = [], []
+        for _ in range(n_epochs):
+            # ── Actor 업데이트 ──────────────────────────
+            new_lp, entropy = actor.evaluate_actions(obs_t, acts_t, masks_t)
+            ratio  = torch.exp(new_lp - old_lp_t)
+            surr1  = ratio * advs_t
+            surr2  = torch.clamp(ratio, 1 - clip_eps, 1 + clip_eps) * advs_t
+            a_loss = (-torch.min(surr1, surr2) - entropy_coef * entropy).mean()
+            self.actor_optimizer.zero_grad()
+            a_loss.backward()
+            torch.nn.utils.clip_grad_norm_(actor.parameters(), 0.5)
+            self.actor_optimizer.step()
+            actor_losses.append(a_loss.item())
+
+            # ── Critic 업데이트 ─────────────────────────
+            # 전역 상태 없을 때: 관측 평균으로 대체 (근사)
+            gs_t   = obs_t.mean(dim=1, keepdim=True).expand(-1, GLOBAL_STATE_DIM)
+            values = self.critic.forward(gs_t.float())
+            c_loss = value_coef * torch.nn.functional.mse_loss(values, rets_t)
+            self.critic_optimizer.zero_grad()
+            c_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
+            self.critic_optimizer.step()
+            critic_losses.append(c_loss.item())
+
+        self.clear_buffers()
+        self.episode_count += 1
+        return {
+            "actor_loss":  float(np.mean(actor_losses)),
+            "critic_loss": float(np.mean(critic_losses)),
+            "n_transitions": len(all_trans),
+        }
+
+    def _compute_returns(
+        self, transitions: List[UnitTransition], gamma: float = 0.99
+    ) -> "torch.Tensor":
+        """Monte Carlo 누적 수익 계산 (할인 γ)"""
+        returns, G = [], 0.0
+        for t in reversed(transitions):
+            G = t.reward + gamma * G * (1.0 - float(t.done))
+            returns.insert(0, G)
+        return torch.tensor(returns, dtype=torch.float32)
 
     def clear_buffers(self):
         self.buffers.clear()
