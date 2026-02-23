@@ -133,7 +133,15 @@ class BayesianHGT(nn.Module):
             for _ in range(n_layers)
         ])
 
-        # 그래프 풀링
+        # 그래프 어텐션 풀링 — 노드별 중요도 학습 (평균/최대 풀링 대비 정밀도 향상)
+        # [hidden] → 스칼라 스코어 → softmax → 가중 합산
+        self.attn_pool = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 4),
+            nn.Tanh(),
+            nn.Linear(hidden_dim // 4, 1),
+        )
+
+        # 풀링 결과 투영
         self.pool_proj = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.GELU(),
@@ -174,10 +182,15 @@ class BayesianHGT(nn.Module):
             h_gat = gat(h, adj)
             h = h + ff(h_gat)
 
-        # 풀링 (평균 풀링 + 최대 풀링 결합)
-        h_mean = h.mean(dim=0, keepdim=True)   # [1, hidden]
-        h_max  = h.max(dim=0).values.unsqueeze(0)  # [1, hidden]
-        h_pool = ((h_mean + h_max) / 2)
+        # 어텐션 풀링 — 중요 노드에 더 높은 가중치 부여
+        attn_scores  = self.attn_pool(h)                            # [N, 1]
+        attn_weights = F.softmax(attn_scores, dim=0)                # [N, 1]
+        h_attn       = (attn_weights * h).sum(dim=0, keepdim=True)  # [1, hidden]
+
+        # 평균/최대 풀링과 앙상블 (다양한 시각 통합)
+        h_mean = h.mean(dim=0, keepdim=True)        # [1, hidden]
+        h_max  = h.max(dim=0).values.unsqueeze(0)   # [1, hidden]
+        h_pool = (h_attn + h_mean + h_max) / 3.0   # [1, hidden]
 
         h_proj = self.pool_proj(h_pool)  # [1, head_dim]
 
@@ -243,6 +256,21 @@ class BayesianHGT(nn.Module):
             "casualty_ci_low":  torch.clamp(cas_means_t.mean(dim=0) - 1.96 * cas_means_t.std(dim=0), min=0.0),
             "casualty_ci_high": torch.clamp(cas_means_t.mean(dim=0) + 1.96 * cas_means_t.std(dim=0), min=0.0),
         }
+
+    def get_node_importance(
+        self, x: torch.Tensor, adj: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        풀링 어텐션 가중치 반환 — 노드별 전투 중요도 [N] (해석 가능성용)
+        값이 클수록 예측에 더 많이 기여한 유닛
+        """
+        h = self.input_proj(x)
+        for gat, ff in zip(self.gat_layers, self.ff_layers):
+            h = h + ff(gat(h, adj))
+        with torch.no_grad():
+            scores = self.attn_pool(h)                       # [N, 1]
+            weights = F.softmax(scores, dim=0).squeeze(-1)   # [N]
+        return weights
 
     def get_attention_weights(self, layer_idx: int = -1) -> Optional[torch.Tensor]:
         """어텐션 가중치 반환 (Explainability용)"""
