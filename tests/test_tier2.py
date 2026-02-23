@@ -21,8 +21,6 @@ try:
     from ontology.combat_schema import ScenarioFactory
     from simulator.mixed_lanchester import MixedLanchesterEngine
 
-    tgnn = NumpyTemporalGNN(node_in_dim=32, gnn_embed_dim=64,
-                             lstm_hidden_dim=128, window_size=8, seed=42)
     kg = ScenarioFactory.create_standard_scenario(n_blue=6, n_red=4, seed=0)
     node_feats = kg.get_node_features()
     edge_idx, _ = kg.get_adjacency_info()
@@ -31,6 +29,11 @@ try:
     if edge_idx.shape[1] > 0:
         adj[edge_idx[0], edge_idx[1]] = 1.0
     np.fill_diagonal(adj, 1.0)
+
+    # 실제 노드 피처 차원을 읽어 초기화 (하드코딩 32 → 동적 차원)
+    actual_node_dim = node_feats.shape[1] if node_feats.ndim == 2 else node_feats.shape[-1]
+    tgnn = NumpyTemporalGNN(node_in_dim=actual_node_dim, gnn_embed_dim=64,
+                             lstm_hidden_dim=128, window_size=8, seed=42)
 
     emb = tgnn.encode_graph(node_feats, adj)
     check("그래프 임베딩 생성", emb.shape == (64,), f"shape={emb.shape}")
