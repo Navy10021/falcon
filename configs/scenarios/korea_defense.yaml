@@ -1,0 +1,118 @@
+# ============================================================
+# 시나리오: 한반도 방어작전 (Korea Defense Operation)
+# 규모: 사단~군단급 정규전
+# 출처: 학술 연구용 합성 데이터
+# ============================================================
+
+scenario:
+  name: "한반도 방어작전"
+  name_en: "Korea Defense Operation"
+  preset_fn: "scenario_korea_defense"     # scenario_presets.py 함수명
+  description: |
+    한반도 전방 방어작전 시나리오.
+    BLUE(한미 연합군) vs RED(북한 전방군단).
+    육군 사단급 + 해군 지원 + 공군 CAS + 해병 여단 합동 방어.
+
+# ── 병력 규모 ──────────────────────────────────────────
+force:
+  blue:
+    total_headcount: 15000
+    units:
+      - type: infantry
+        echelon: division
+        count: 1
+        headcount: 12000
+        designation: "제1보병사단"
+        morale: 0.85
+        experience: 0.70
+      - type: armor
+        echelon: brigade
+        count: 1
+        headcount: 2000
+        designation: "제1기갑여단"
+        morale: 0.82
+        experience: 0.72
+      - type: artillery
+        echelon: regiment
+        count: 1
+        headcount: 600
+        designation: "제1포병연대"
+        morale: 0.80
+        experience: 0.68
+      - type: marine_infantry
+        echelon: brigade
+        count: 1
+        headcount: 4000
+        designation: "해병 제1여단"
+        morale: 0.88
+        experience: 0.75
+      - type: destroyer
+        echelon: ship
+        count: 2
+        headcount: 350
+        designation: "이지스 구축함 전대"
+      - type: fighter
+        echelon: wing
+        count: 1
+        headcount: 150
+        designation: "제11전투비행단"
+  red:
+    total_headcount: 30000
+    units:
+      - type: infantry
+        echelon: corps
+        count: 1
+        headcount: 25000
+        designation: "전방군단"
+        morale: 0.75
+        experience: 0.65
+      - type: armor
+        echelon: brigade
+        count: 2
+        headcount: 3000
+        designation: "기갑여단"
+      - type: artillery
+        echelon: regiment
+        count: 2
+        headcount: 800
+        designation: "장사정포연대"
+      - type: ballistic_missile
+        echelon: battalion
+        count: 1
+        headcount: 200
+        designation: "스커드 미사일대대"
+
+# ── 지형 ─────────────────────────────────────────────
+terrain:
+  map_size_km: 80
+  types:
+    - { terrain: mountain, ratio: 0.30 }
+    - { terrain: open, ratio: 0.35 }
+    - { terrain: urban, ratio: 0.20 }
+    - { terrain: river, ratio: 0.10 }
+    - { terrain: forest, ratio: 0.05 }
+
+# ── 환경 조건 ────────────────────────────────────────
+environment:
+  fog_level: moderate         # clear | light | moderate | heavy | maximum
+  weather: overcast           # clear | overcast | rain | snow
+  visibility_km: 8
+  time_of_day: daytime        # daytime | nighttime
+  season: winter
+
+# ── 특수 위협 ────────────────────────────────────────
+threats:
+  long_range_artillery: true  # 장사정포 위협
+  special_forces_infiltration: true  # 특수전 침투
+  emp_threat: false           # EMP 위협
+  cyber_attack: false
+
+# ── 학습 파라미터 ────────────────────────────────────
+training:
+  episodes: 1000
+  max_steps: 80
+  reward_weights:
+    force_preservation: 0.35
+    doctrine_compliance: 0.30
+    territory_control: 0.25
+    civilian_protection: 0.10

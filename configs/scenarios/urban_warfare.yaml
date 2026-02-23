@@ -1,0 +1,115 @@
+# ============================================================
+# 시나리오: 시가전 (Urban Warfare)
+# 규모: 소대~중대급 근접전
+# 출처: 학술 연구용 합성 데이터
+# ============================================================
+
+scenario:
+  name: "시가전"
+  name_en: "Urban Warfare"
+  preset_fn: "scenario_urban_warfare"     # scenario_presets.py 함수명
+  description: |
+    고강도 시가전 시나리오.
+    BLUE(기계화보병 중대 + 공병 + 드론 지원) vs
+    RED(방어 보병 + 저격수 + IED 위협).
+    부수피해 최소화 제약, 드론 정찰, 건물 제거 역학.
+
+# ── 병력 규모 ──────────────────────────────────────────
+force:
+  blue:
+    total_headcount: 350
+    units:
+      - type: mechanized_infantry
+        echelon: company
+        count: 1
+        headcount: 150
+        designation: "제1기계화보병중대"
+        morale: 0.85
+        experience: 0.72
+      - type: armor
+        echelon: platoon
+        count: 1
+        headcount: 30
+        designation: "전차소대 (K2 전차)"
+      - type: engineer
+        echelon: platoon
+        count: 1
+        headcount: 40
+        designation: "공병소대"
+      - type: uav_recon
+        echelon: platoon
+        count: 1
+        headcount: 15
+        designation: "드론 정찰반"
+      - type: special_forces
+        echelon: squad
+        count: 2
+        headcount: 24
+        designation: "특수전 분대"
+  red:
+    total_headcount: 280
+    units:
+      - type: infantry
+        echelon: company
+        count: 1
+        headcount: 180
+        designation: "적 방어보병중대"
+        morale: 0.72
+        experience: 0.55
+      - type: special_forces
+        echelon: squad
+        count: 3
+        headcount: 36
+        designation: "저격수/특수전분대"
+      - type: loitering_munition
+        echelon: squad
+        count: 2
+        headcount: 10
+        designation: "자폭드론 운용반"
+
+# ── 지형 ─────────────────────────────────────────────
+terrain:
+  map_size_km: 5               # 시가전은 좁은 구역
+  types:
+    - { terrain: urban, ratio: 0.60 }
+    - { terrain: urban_rubble, ratio: 0.20 }
+    - { terrain: open, ratio: 0.15 }
+    - { terrain: river, ratio: 0.05 }
+  buildings:
+    density: high              # low | medium | high
+    avg_floors: 4
+    fortification_ratio: 0.30  # 진지화 건물 비율
+
+# ── 환경 조건 ────────────────────────────────────────
+environment:
+  fog_level: heavy             # 시가전 — 관측 매우 제한
+  weather: overcast
+  visibility_km: 1.5
+  time_of_day: nighttime       # 야간 작전
+  civilian_presence: true      # 민간인 존재
+
+# ── 특수 위협 ────────────────────────────────────────
+threats:
+  ied_threat: true             # IED 위협
+  sniper_threat: true          # 저격수
+  loitering_munition: true     # 자폭드론
+  ew_jamming: false
+
+# ── 제약 조건 (ROE) ──────────────────────────────────
+roe:
+  collateral_damage_limit: 0.10   # 부수피해 허용 한도 10%
+  no_strike_zones:
+    - "병원"
+    - "학교"
+    - "종교시설"
+  fire_authorization: "company_commander_plus"  # 사격 승인 수준
+
+# ── 학습 파라미터 ────────────────────────────────────
+training:
+  episodes: 500
+  max_steps: 40
+  reward_weights:
+    objective_capture: 0.35
+    civilian_protection: 0.30
+    force_preservation: 0.25
+    roe_compliance: 0.10
