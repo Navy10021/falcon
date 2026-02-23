@@ -184,11 +184,13 @@ def train_phase1(args):
     from ontology.doctrine_encoder import DoctrineEncoder  # P3-5
     from simulator.combat_dynamics import CombatDynamicsManager  # 단기: 역학 통합
     from ontology.multidomain import MultiDomainAnalyzer          # 중기: 멀티도메인 분석
+    from ontology.temporal_extension import TemporalStateTracker  # 시계열 트렌드 연동
 
     engine = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)  # P3-1
-    dynamics    = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합 관리
-    md_analyzer = MultiDomainAnalyzer(seed=args.seed)    # 중기: 공-해-지 도메인 상태 추적
+    dynamics        = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합 관리
+    md_analyzer     = MultiDomainAnalyzer(seed=args.seed)    # 중기: 공-해-지 도메인 상태 추적
+    temporal_tracker = TemporalStateTracker(window_size=10)  # 시계열 트렌드 추적
     curriculum = CurriculumScheduler()
     gnn = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim = torch.optim.Adam(gnn.parameters(), lr=1e-3)
@@ -222,6 +224,7 @@ def train_phase1(args):
                 seed=args.seed + ep,
             )
         dynamics.initialize_from_kg(kg)  # 단기: 에피소드별 보급 상태 초기화
+        temporal_tracker.reset()          # 시계열 트래커 초기화
         initial_blue_hc = sum(u.headcount for u in kg.units.values()
                               if u.alignment == ForceAlignment.BLUE)
 
@@ -262,9 +265,13 @@ def train_phase1(args):
             gnn_unc_mult = md_analyzer.get_uncertainty_multiplier(md_state)
             gnn_ext      = np.clip(gnn_ext * gnn_unc_mult, -10.0, 10.0).astype(np.float32)
 
+            # 시계열 트렌드 특성 (8D) — TemporalStateTracker 슬라이딩 윈도우
+            temporal_trend = temporal_tracker.get_trend_features()
+
             # PPO 상태
             state = build_state_vector(obs_kg, gnn_extension=gnn_ext,
-                                       uncertainty_map=uncertainty_map)
+                                       uncertainty_map=uncertainty_map,
+                                       temporal_features=temporal_trend)
             avg_unc = float(np.mean(list(uncertainty_map.values()))) if uncertainty_map else 0.0
 
             action, log_prob, value = blue_agent.select_action(state)
@@ -282,6 +289,12 @@ def train_phase1(args):
 
             # 단기: CombatDynamicsManager — 탄약/연료 소모, EMS 업데이트 (BDA는 MixedEngine 전용)
             dynamics.step_update(kg, {})
+
+            # 시계열 트래커 스냅샷 기록 (매 스텝)
+            temporal_tracker.record_snapshot(
+                kg.units,
+                events=[f"ep{ep}_step{step_t}_{step_result.mission_status}"]
+            )
 
             # P3-2: GNN 노드 특성 동기화 (변경된 유닛 상태 → 그래프 반영)
             kg.update_node_features()
@@ -535,6 +548,7 @@ def train_phase4(args):
     from rl_agent.inverse_rl import IRLRewardLoader  # P3-4
     from simulator.combat_dynamics import CombatDynamicsManager  # 단기: 역학 통합
     from ontology.multidomain import MultiDomainAnalyzer          # 중기: 멀티도메인 분석
+    from ontology.temporal_extension import TemporalStateTracker  # 시계열 트렌드
 
     # 선호도 어댑터 로드
     if args.preference_model and os.path.isfile(args.preference_model):
@@ -555,9 +569,10 @@ def train_phase4(args):
 
     engine          = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)
-    dynamics        = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합
-    md_analyzer     = MultiDomainAnalyzer(seed=args.seed)    # 중기: 공-해-지 도메인 상태 추적
-    curriculum      = CurriculumScheduler()
+    dynamics         = CombatDynamicsManager(seed=args.seed)   # 단기: BDA/보급/EMS 통합
+    md_analyzer      = MultiDomainAnalyzer(seed=args.seed)     # 중기: 공-해-지 도메인 상태 추적
+    temporal_tracker = TemporalStateTracker(window_size=10)    # 시계열 트렌드 추적
+    curriculum       = CurriculumScheduler()
     gnn             = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim       = torch.optim.Adam(gnn.parameters(), lr=1e-3)
     gnn_loss_fn     = CombatGNNLoss()
@@ -591,6 +606,7 @@ def train_phase4(args):
                 seed=args.seed + ep,
             )
         dynamics.initialize_from_kg(kg)  # 단기: 에피소드별 보급 상태 초기화
+        temporal_tracker.reset()          # 시계열 트래커 초기화
         initial_blue_hc = sum(u.headcount for u in kg.units.values()
                               if u.alignment == ForceAlignment.BLUE)
         prev_blue_hc    = initial_blue_hc
@@ -619,8 +635,12 @@ def train_phase4(args):
             gnn_unc_mult = md_analyzer.get_uncertainty_multiplier(md_state)
             gnn_ext      = np.clip(gnn_ext * gnn_unc_mult, -10.0, 10.0).astype(np.float32)
 
+            # 시계열 트렌드 특성 (Phase 4도 동일 적용)
+            temporal_trend = temporal_tracker.get_trend_features()
+
             state = build_state_vector(obs_kg, gnn_extension=gnn_ext,
-                                       uncertainty_map=uncertainty_map)
+                                       uncertainty_map=uncertainty_map,
+                                       temporal_features=temporal_trend)
             avg_unc = float(np.mean(list(uncertainty_map.values()))) if uncertainty_map else 0.0
             action, log_prob, value = blue_agent.select_action(state)
 
@@ -637,6 +657,12 @@ def train_phase4(args):
 
             # 단기: CombatDynamicsManager — 탄약/연료 소모, EMS 업데이트
             dynamics.step_update(kg, {})
+
+            # 시계열 트래커 스냅샷 기록 (Phase 4)
+            temporal_tracker.record_snapshot(
+                kg.units,
+                events=[f"p4_ep{ep}_step{step_t}_{step_result.mission_status}"]
+            )
 
             kg.update_node_features()
 
