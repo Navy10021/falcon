@@ -240,6 +240,85 @@ class LeagueManager:
             return 1.0
         return float(np.std(recent_wrs))
 
+    def compute_alpha_rank(self, n_top: Optional[int] = None) -> Dict[str, float]:
+        """
+        Alpha-Rank 전략 순위 계산 (Omidshafiei et al., 2019).
+
+        다중 에이전트 환경에서 각 에이전트의 마코프-체인 정적 분포를
+        수렴 결과(α→∞)로 근사한다.
+
+        알고리즘 개요:
+          1. 모든 대전 쌍의 승률 행렬 M(i,j) 구성
+          2. 전이 확률 행렬 T 구성: T[i→j] ∝ σ(α·(M(j,i)-M(i,j)))
+          3. 정상 분포(π) 계산 — 반복 거듭제곱법
+          4. 점수 정규화 후 반환
+
+        Parameters
+        ----------
+        n_top : int, optional
+            반환할 상위 에이전트 수 (None=전체)
+
+        Returns
+        -------
+        Dict[str, float]
+            {agent_id: alpha_rank_score} — 합이 1.0인 확률 분포
+        """
+        agents = list(self.agents.values()) + self.snapshots
+        n = len(agents)
+        if n == 0:
+            return {}
+        if n == 1:
+            return {agents[0].agent_id: 1.0}
+
+        # 1. 승률 행렬 M[i,j] = i가 j를 상대로 한 승률 (역사 기록 기반)
+        M = np.full((n, n), 0.5)  # 기록 없으면 0.5 (균등)
+        for i, a_i in enumerate(agents):
+            for j, a_j in enumerate(agents):
+                if i == j:
+                    M[i, j] = 0.5
+                    continue
+                hist = [r for oid, r in a_i.matchup_history if oid == a_j.agent_id]
+                if hist:
+                    M[i, j] = float(np.mean(hist))
+                else:
+                    # ELO 기반 기대 승률 폴백
+                    M[i, j] = 1.0 / (1.0 + 10 ** ((a_j.elo_rating - a_i.elo_rating) / 400.0))
+
+        # 2. 전이 확률 행렬 (α=10.0 — 충분히 선택적)
+        alpha = 10.0
+        T = np.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                # σ(α·(M[j,i] - M[i,j])) — j가 i를 이길 확률 기반
+                advantage = M[j, i] - M[i, j]
+                T[i, j] = 1.0 / (1.0 + np.exp(-alpha * advantage))
+            # 자기 자신으로의 전이 = 나머지 확률
+            row_sum = T[i].sum()
+            T[i, i] = max(0.0, n - 1 - row_sum)
+            T[i] /= T[i].sum() + 1e-12
+
+        # 3. 정상 분포 — 거듭제곱법 (Power Iteration)
+        pi = np.ones(n) / n
+        for _ in range(1000):
+            pi_new = pi @ T
+            if np.max(np.abs(pi_new - pi)) < 1e-9:
+                break
+            pi = pi_new
+        pi = pi / pi.sum()
+
+        # 4. 결과 사전 구성
+        ranked = sorted(
+            zip([a.agent_id for a in agents], pi.tolist()),
+            key=lambda x: -x[1]
+        )
+        if n_top is not None:
+            ranked = ranked[:n_top]
+
+        total = sum(v for _, v in ranked)
+        return {aid: v / (total + 1e-12) for aid, v in ranked}
+
     def print_leaderboard(self):
         print("\n[League 순위표 (ELO)]")
         sorted_agents = sorted(

@@ -169,6 +169,67 @@ class RedAgent:
         self.total_steps += n
         return metrics
 
+    def compute_observation_perturbation(
+        self,
+        obs: np.ndarray,
+        perturbation_type: str = "gaussian",
+        epsilon: float = 0.1,
+        rng: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """
+        Blue 관측 벡터에 적대적 perturbation 주입.
+
+        Red가 DECEPTION 행동을 선택했을 때 Blue 상태벡터를
+        왜곡하여 잘못된 의사결정을 유도한다.
+
+        Parameters
+        ----------
+        obs : np.ndarray
+            Blue 에이전트의 원본 관측 벡터 (STATE_DIM,)
+        perturbation_type : str
+            "gaussian" — 가우시안 노이즈 (센서 오류 모사)
+            "sign"     — FGSM 방식 부호 공격
+            "uniform"  — 균등 노이즈
+            "zero_out" — 랜덤 차원 제로화 (통신 두절 모사)
+        epsilon : float
+            perturbation 크기 (l∞ 기준)
+        rng : optional np.ndarray
+            재현용 RandomState (None이면 내부 rng 사용)
+
+        Returns
+        -------
+        np.ndarray
+            perturbation이 적용된 관측 벡터 (동일 shape)
+        """
+        _rng = rng if rng is not None else np.random.RandomState(self.total_steps)
+        perturbed = obs.copy().astype(np.float32)
+
+        if perturbation_type == "gaussian":
+            noise = _rng.randn(*obs.shape).astype(np.float32) * epsilon
+            perturbed = perturbed + noise
+
+        elif perturbation_type == "sign":
+            # FGSM-style: 부호만 사용하여 최대 l∞ 공격
+            grad_sign = np.sign(_rng.randn(*obs.shape)).astype(np.float32)
+            perturbed = perturbed + epsilon * grad_sign
+
+        elif perturbation_type == "uniform":
+            noise = _rng.uniform(-epsilon, epsilon, size=obs.shape).astype(np.float32)
+            perturbed = perturbed + noise
+
+        elif perturbation_type == "zero_out":
+            # 랜덤하게 epsilon 비율의 차원을 0으로 설정 (통신 두절 효과)
+            n_zero = max(1, int(len(obs) * epsilon))
+            zero_idx = _rng.choice(len(obs), size=n_zero, replace=False)
+            perturbed[zero_idx] = 0.0
+
+        else:
+            raise ValueError(f"Unknown perturbation_type: {perturbation_type!r}")
+
+        # 벡터 범위 클리핑 (상태벡터 정규화 범위 유지)
+        perturbed = np.clip(perturbed, -10.0, 10.0)
+        return perturbed
+
     def apply_deception(self, fog_filter) -> bool:
         """기만 전술 실행 → Fog Filter에 노이즈 증가 요청"""
         if hasattr(fog_filter, 'noise'):
