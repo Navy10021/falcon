@@ -358,46 +358,104 @@ class MATTrainer:
     # ------------------------------------------------------------------
 
     def update(self, next_values: Optional[np.ndarray] = None) -> Dict[str, float]:
-        """버퍼 데이터로 MAT PPO 업데이트."""
+        """버퍼 데이터로 MAT PPO 업데이트.
+
+        에피소드 내 에이전트 수(N)가 가변적인 경우를 안전하게 처리:
+          - N이 일정한 연속 세그먼트에서만 GAE 부트스트랩 적용
+          - N이 달라지거나 done=True 경계에서 G를 0으로 리셋
+        """
         if len(self.buffer) == 0:
             return {}
 
         T = len(self.buffer)
         cfg = self.cfg
 
-        # GAE 이득 계산
-        advantages = []
-        G = np.zeros_like(self.buffer.transitions[0].values)
+        # ── GAE 이득 계산 (가변 N 안전 처리) ──────────────────────────
+        advantages_list: List[np.ndarray] = [None] * T  # type: ignore[list-item]
+        G = np.zeros(1, dtype=np.float32)
+
         for t in reversed(range(T)):
-            tr = self.buffer.transitions[t]
-            mask = 1.0 - tr.dones.astype(np.float32)
-            nv = next_values if (t == T - 1 and next_values is not None) else (
-                self.buffer.transitions[t + 1].values if t + 1 < T else np.zeros_like(tr.values)
-            )
+            tr   = self.buffer.transitions[t]
+            N_t  = len(tr.values)
+            mask = 1.0 - tr.dones.astype(np.float32)  # [N_t]
+
+            # 부트스트랩 값: 다음 스텝이 없거나 N이 달라지면 0으로 리셋
+            if t == T - 1:
+                nv = next_values if (next_values is not None and len(next_values) == N_t) \
+                     else np.zeros(N_t, dtype=np.float32)
+            else:
+                tr_next = self.buffer.transitions[t + 1]
+                if len(tr_next.values) == N_t:
+                    nv = tr_next.values
+                else:
+                    nv = np.zeros(N_t, dtype=np.float32)  # N 불일치: G 리셋
+
+            # G 크기가 N_t와 다르면 리셋
+            if G.shape != (N_t,):
+                G = np.zeros(N_t, dtype=np.float32)
+
             delta = tr.rewards + cfg.gamma * nv * mask - tr.values
             G = delta + cfg.gamma * cfg.gae_lambda * mask * G
-            advantages.insert(0, G)
+            advantages_list[t] = G.copy()
 
-        # 텐서 변환
-        def stack(attr):
-            return np.stack([getattr(tr, attr) for tr in self.buffer.transitions])
+        # ── 텐서 변환 (가변 N → 평탄화) ──────────────────────────────
+        # 각 스텝을 독립적인 배치 원소로 처리 (step-wise batching)
+        obs_list   = [tr.obs       for tr in self.buffer.transitions]  # list of [N_t, obs_dim]
+        type_list  = [tr.type_ids  for tr in self.buffer.transitions]  # list of [N_t]
+        act_list   = [tr.actions   for tr in self.buffer.transitions]
+        olp_list   = [tr.log_probs for tr in self.buffer.transitions]
+        val_list   = [tr.values    for tr in self.buffer.transitions]
+        adv_list   = advantages_list
+        mask_list  = [tr.action_masks for tr in self.buffer.transitions]
 
-        obs_np   = stack("obs")       # [T, N, obs_dim]
-        type_np  = stack("type_ids")  # [T, N]
-        acts_np  = stack("actions")   # [T, N]
-        olp_np   = stack("log_probs") # [T, N]
-        rets_np  = stack("values") + np.array(advantages)  # [T, N]
-        adv_np   = np.array(advantages)  # [T, N]
+        has_masks = mask_list[0] is not None
 
-        # 정규화
+        # 모든 N이 동일하면 np.stack, 아니면 각 step을 개별 처리
+        all_n = [tr.obs.shape[0] for tr in self.buffer.transitions]
+        uniform_n = len(set(all_n)) == 1
+
+        if uniform_n:
+            obs_np  = np.stack(obs_list)      # [T, N, obs_dim]
+            type_np = np.stack(type_list)     # [T, N]
+            acts_np = np.stack(act_list)
+            olp_np  = np.stack(olp_list)
+            val_np  = np.stack(val_list)
+            adv_np  = np.stack(adv_list)
+            masks_np= np.stack(mask_list) if has_masks else None
+            rets_np = val_np + adv_np
+        else:
+            # 가변 N: 에이전트 차원을 평탄화하여 [T*N_avg, ...] 형태로 변환
+            # 각 스텝은 크기가 다를 수 있으므로 스텝을 배치로 처리
+            # 편의상 패딩하여 max_N에 맞춤
+            max_n = max(all_n)
+            obs_dim = obs_list[0].shape[1]
+            n_act   = act_list[0].shape[0]
+
+            obs_np   = np.zeros((T, max_n, obs_dim), dtype=np.float32)
+            type_np  = np.zeros((T, max_n), dtype=np.int64)
+            acts_np  = np.zeros((T, max_n), dtype=np.int64)
+            olp_np   = np.zeros((T, max_n), dtype=np.float32)
+            val_np   = np.zeros((T, max_n), dtype=np.float32)
+            adv_np   = np.zeros((T, max_n), dtype=np.float32)
+            rets_np  = np.zeros((T, max_n), dtype=np.float32)
+            pad_mask_np = np.ones((T, max_n), dtype=bool)   # True=pad
+            masks_np = np.zeros((T, max_n, self.cfg.n_actions), dtype=bool) if has_masks else None
+
+            for t, tr in enumerate(self.buffer.transitions):
+                n = all_n[t]
+                obs_np[t, :n]    = obs_list[t]
+                type_np[t, :n]   = type_list[t]
+                acts_np[t, :n]   = act_list[t]
+                olp_np[t, :n]    = olp_list[t]
+                val_np[t, :n]    = val_list[t]
+                adv_np[t, :n]    = adv_list[t]
+                rets_np[t, :n]   = val_list[t] + adv_list[t]
+                pad_mask_np[t, :n] = False
+                if has_masks and mask_list[t] is not None:
+                    masks_np[t, :n] = mask_list[t]
+
         adv_np = (adv_np - adv_np.mean()) / (adv_np.std() + 1e-8)
-
-        # 마스크 처리
-        first_mask = self.buffer.transitions[0].action_masks
-        has_masks  = first_mask is not None
-        masks_np   = stack("action_masks") if has_masks else None
-
-        TN = T  # 배치 크기는 T (각 스텝이 하나의 배치 원소)
+        TN = T  # 배치 크기는 T
 
         obs_t   = torch.tensor(obs_np,  dtype=torch.float32, device=self.device)
         type_t  = torch.tensor(type_np, dtype=torch.long,    device=self.device)
@@ -408,17 +466,27 @@ class MATTrainer:
         masks_t = (torch.tensor(masks_np, dtype=torch.bool, device=self.device)
                    if has_masks else None)
 
+        # 가변 N 패딩 마스크 (True=유효 에이전트)
+        valid_t = None
+        if not uniform_n:
+            valid_t = torch.tensor(~pad_mask_np, dtype=torch.bool, device=self.device)  # [T, N_max]
+
         # teacher-forcing prev_actions: [T, N] (BOS=0, 이후 실제 행동+1)
         prev_acts_t = torch.zeros_like(acts_t)
         prev_acts_t[:, 1:] = acts_t[:, :-1] + 1   # 시프트
+
+        # Transformer 인코더에 전달할 패딩 마스크 [T, N_max] (True=패드)
+        enc_pad_mask_t = None if uniform_n else torch.tensor(pad_mask_np, dtype=torch.bool, device=self.device)
 
         policy_losses, value_losses, entropy_vals = [], [], []
         for _ in range(cfg.n_epochs):
             idx = torch.randperm(TN)
             for start in range(0, TN, cfg.batch_size):
                 b = idx[start:start + cfg.batch_size]
+                pad_b = enc_pad_mask_t[b] if enc_pad_mask_t is not None else None
+
                 logits, values_pred = self.policy(
-                    obs_t[b], type_t[b], prev_acts_t[b]
+                    obs_t[b], type_t[b], prev_acts_t[b], pad_mask=pad_b
                 )   # [B, N, n_actions], [B, N]
 
                 if masks_t is not None:
@@ -428,13 +496,26 @@ class MATTrainer:
                 new_lp= dist.log_prob(acts_t[b])   # [B, N]
                 entropy = dist.entropy()            # [B, N]
 
-                ratio = (new_lp - olp_t[b]).exp()
-                adv_b = adv_t[b]
+                # 유효 에이전트만 손실 계산
+                if valid_t is not None:
+                    valid_b = valid_t[b]  # [B, N]
+                    new_lp  = new_lp[valid_b]
+                    entropy = entropy[valid_b]
+                    values_pred = values_pred[valid_b]
+                    rets_b  = rets_t[b][valid_b]
+                    adv_b   = adv_t[b][valid_b]
+                    olp_b   = olp_t[b][valid_b]
+                else:
+                    rets_b  = rets_t[b]
+                    adv_b   = adv_t[b]
+                    olp_b   = olp_t[b]
+
+                ratio = (new_lp - olp_b).exp()
                 surr = -torch.min(
                     ratio * adv_b,
                     ratio.clamp(1 - cfg.clip_eps, 1 + cfg.clip_eps) * adv_b
                 ).mean()
-                vl = F.mse_loss(values_pred, rets_t[b])
+                vl = F.mse_loss(values_pred, rets_b)
                 loss = surr + cfg.value_coef * vl - cfg.entropy_coef * entropy.mean()
 
                 self.optimizer.zero_grad()

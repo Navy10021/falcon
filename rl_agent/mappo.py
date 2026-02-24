@@ -230,6 +230,7 @@ class UnitTransition:
     global_value: float
     done: bool
     action_mask: np.ndarray
+    unit_type: str = "infantry"   # HAPPO 순차 업데이트용 유닛 유형
 
 
 class MAPPOManager:
@@ -443,6 +444,7 @@ class MAPPOManager:
                 global_value=global_value,
                 done=done,
                 action_mask=obs.action_mask,
+                unit_type=obs.unit_type,   # HAPPO 순차 업데이트용
             ))
 
     def get_action_distribution_stats(self, kg) -> Dict[str, Dict]:
@@ -584,11 +586,10 @@ class MAPPOManager:
         old_lp_t = torch.tensor([t.log_prob             for t in all_trans], dtype=torch.float32)
         masks_t  = torch.tensor(np.stack([t.action_mask for t in all_trans]), dtype=torch.bool)
 
-        # 유닛 유형별 인덱스 매핑
+        # 유닛 유형별 인덱스 매핑 (unit_type 필드 사용)
         type_to_indices: Dict[str, List[int]] = {}
         for idx, trans in enumerate(all_trans):
-            utype = trans.unit_id.split("_")[0] if "_" in trans.unit_id else "infantry"
-            type_to_indices.setdefault(utype, []).append(idx)
+            type_to_indices.setdefault(trans.unit_type, []).append(idx)
 
         # HAPPO 순차 업데이트 순서 (지원 → 전투)
         update_order = [
