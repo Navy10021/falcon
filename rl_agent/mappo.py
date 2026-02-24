@@ -537,6 +537,141 @@ class MAPPOManager:
             returns.insert(0, G)
         return torch.tensor(returns, dtype=torch.float32)
 
+    def happo_update(
+        self,
+        clip_eps: float = 0.2,
+        value_coef: float = 0.5,
+        entropy_coef: float = 0.01,
+        n_epochs: int = 4,
+        gamma: float = 0.99,
+    ) -> Dict:
+        """
+        HAPPO (Heterogeneous-Agent PPO) 순차 업데이트.
+
+        Zhong et al., ICLR 2022:
+          "Heterogeneous-Agent Trust Region Policy Optimisation"
+
+        동시 업데이트(기존 update()) 대신 유닛 유형을 순서대로 업데이트하여
+        결합 단조 개선(joint monotonic improvement)을 보장한다.
+
+        업데이트 순서 (지원→전투):
+          logistics → signal → engineer → infantry → armor → artillery
+          → aviation → electronic_warfare
+
+        각 유닛 유형 i 업데이트 시:
+          - 이전 유형들의 누적 중요도 비율(importance weight accumulation) 반영
+          - loss = -E[∏_{k<i} r_k(θ) · r_i(θ) · A_i]
+
+        Returns
+        -------
+        Dict
+            유닛 유형별 손실 및 전체 통계
+        """
+        if not TORCH_AVAILABLE or not self.buffers:
+            return {}
+
+        all_trans = [t for buf in self.buffers.values() for t in buf]
+        if not all_trans:
+            return {}
+
+        rets_t = self._compute_returns(all_trans, gamma)
+        vals_t = torch.tensor([t.global_value for t in all_trans], dtype=torch.float32)
+        advs_t = rets_t - vals_t
+        advs_t = (advs_t - advs_t.mean()) / (advs_t.std() + 1e-8)
+
+        obs_t    = torch.tensor(np.stack([t.observation for t in all_trans]), dtype=torch.float32)
+        acts_t   = torch.tensor([t.action               for t in all_trans], dtype=torch.long)
+        old_lp_t = torch.tensor([t.log_prob             for t in all_trans], dtype=torch.float32)
+        masks_t  = torch.tensor(np.stack([t.action_mask for t in all_trans]), dtype=torch.bool)
+
+        # 유닛 유형별 인덱스 매핑
+        type_to_indices: Dict[str, List[int]] = {}
+        for idx, trans in enumerate(all_trans):
+            utype = trans.unit_id.split("_")[0] if "_" in trans.unit_id else "infantry"
+            type_to_indices.setdefault(utype, []).append(idx)
+
+        # HAPPO 순차 업데이트 순서 (지원 → 전투)
+        update_order = [
+            "logistics", "signal", "engineer",
+            "infantry", "armor", "artillery", "aviation", "electronic_warfare",
+        ]
+
+        # 누적 중요도 비율 (∏_{k<i} r_k) — 전체 샘플에 대해 유지
+        accumulated_ratio = torch.ones(len(all_trans), dtype=torch.float32)
+
+        type_losses: Dict[str, float] = {}
+        critic_losses_all: List[float] = []
+
+        for unit_type in update_order:
+            if unit_type not in self.type_actors:
+                continue
+            indices = type_to_indices.get(unit_type, [])
+            if not indices:
+                accumulated_ratio = accumulated_ratio.detach()
+                continue
+
+            actor = self.type_actors[unit_type]
+            if not isinstance(actor, TorchUnitActor):
+                accumulated_ratio = accumulated_ratio.detach()
+                continue
+
+            idx_t = torch.tensor(indices, dtype=torch.long)
+            type_actor_losses: List[float] = []
+
+            for _ in range(n_epochs):
+                new_lp, entropy = actor.evaluate_actions(
+                    obs_t[idx_t], acts_t[idx_t], masks_t[idx_t]
+                )
+                ratio_i = torch.exp(new_lp - old_lp_t[idx_t])
+
+                # 누적 비율 적용 (이전 유형들의 비율 곱)
+                acc_ratio_i = accumulated_ratio[idx_t].detach() * ratio_i
+
+                adv_i = advs_t[idx_t]
+                surr1 = acc_ratio_i * adv_i
+                surr2 = (
+                    torch.clamp(acc_ratio_i, 1 - clip_eps, 1 + clip_eps) * adv_i
+                )
+                actor_loss = (-torch.min(surr1, surr2) - entropy_coef * entropy).mean()
+
+                self.actor_optimizer.zero_grad()
+                actor_loss.backward()
+                torch.nn.utils.clip_grad_norm_(actor.parameters(), 0.5)
+                self.actor_optimizer.step()
+                type_actor_losses.append(actor_loss.item())
+
+            # 이 유형의 비율로 누적 갱신 (다음 유형 업데이트에 반영)
+            with torch.no_grad():
+                new_lp_final, _ = actor.evaluate_actions(
+                    obs_t[idx_t], acts_t[idx_t], masks_t[idx_t]
+                )
+                ratio_final = torch.exp(new_lp_final - old_lp_t[idx_t])
+                accumulated_ratio = accumulated_ratio.clone()
+                accumulated_ratio[idx_t] = accumulated_ratio[idx_t] * ratio_final
+
+            type_losses[unit_type] = float(np.mean(type_actor_losses)) if type_actor_losses else 0.0
+
+            # Critic 업데이트 (유닛 유형마다 1회)
+            gs_t   = obs_t.mean(dim=1, keepdim=True).expand(-1, GLOBAL_STATE_DIM)
+            values = self.critic.forward(gs_t.float())
+            c_loss = value_coef * torch.nn.functional.mse_loss(values, rets_t)
+            self.critic_optimizer.zero_grad()
+            c_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
+            self.critic_optimizer.step()
+            critic_losses_all.append(c_loss.item())
+
+        self.clear_buffers()
+        self.episode_count += 1
+
+        result = {
+            "happo_critic_loss": float(np.mean(critic_losses_all)) if critic_losses_all else 0.0,
+            "n_transitions": len(all_trans),
+            "n_types_updated": len(type_losses),
+        }
+        result.update({f"happo_actor_{k}": v for k, v in type_losses.items()})
+        return result
+
     def clear_buffers(self):
         self.buffers.clear()
 
