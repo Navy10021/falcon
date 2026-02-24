@@ -155,21 +155,21 @@ class DomainRandomizer:
         kg2 = copy.deepcopy(kg)
 
         for unit in kg2.units.values():
+            cap = unit.capability  # Capability 단일 객체
+
             # 1) 병력 규모 스케일
             unit.headcount = max(1, int(unit.headcount * sample.force_scale))
 
-            # 2) 전투력 지수 스케일
-            if unit.capabilities:
-                for cap in unit.capabilities:
-                    cap.effectiveness = float(
-                        np.clip(cap.effectiveness * sample.combat_power_scale, 0.0, 1.0)
-                    )
+            # 2) 전투력 지수 스케일 (firepower / mobility / protection 비례 조정)
+            scale = float(np.clip(sample.combat_power_scale, 0.3, 2.5))
+            cap.firepower   = float(np.clip(cap.firepower   * scale, 0.0, 1.0))
+            cap.mobility    = float(np.clip(cap.mobility    * scale, 0.0, 1.0))
+            cap.protection  = float(np.clip(cap.protection  * scale, 0.0, 1.0))
 
-            # 3) 보급 방해 → 일부 유닛 전투력 감소
+            # 3) 보급 방해 → 탄약·연료 수준 감소
             if self.rng.random() < sample.supply_disruption_prob:
-                if unit.capabilities:
-                    for cap in unit.capabilities:
-                        cap.effectiveness *= 0.6
+                cap.ammo_level  = float(np.clip(cap.ammo_level  * 0.5, 0.0, 1.0))
+                cap.fuel_level  = float(np.clip(cap.fuel_level  * 0.5, 0.0, 1.0))
 
             # 4) Red 증원 (Red 측 유닛만)
             if (unit.alignment == ForceAlignment.RED
