@@ -198,10 +198,55 @@ Monte Carlo report는 풍부하지만, 실험 단위(run_id/config/git_sha)와 1
 - [R8] 멀티도메인 학습 시나리오 배치 실험(ground/air/naval/multi)
 - [R9] 위험 민감 평가(CVaR 중심) 기반 하이퍼파라미터 탐색
 
+### 실행 상세안
+
+#### [R7] MAPPO 엔트리 포인트 연결 고도화
+
+- **목표**: `train.py --phase 2 --algorithm mappo`를 표준 실험 파이프라인(로그/체크포인트/리포트)과 완전 정렬
+- **핵심 작업**
+  1. CLI 계약 고정: `phase=2 + algorithm in {ppo,mappo}` 조합 외 입력을 명시적으로 차단
+  2. 공통 산출물 통일: PPO/MAPPO 모두 `run_manifest.json`, `metrics.json`, `evaluation_summary.json` 생성
+  3. 비교 리포트 자동화: 동일 seed/시나리오에서 PPO vs MAPPO 성능 차이를 테이블로 출력
+- **정량 지표**
+  - `win_rate`, `mission_time`, `blue_casualties`, `force_reduction`, `stability(std over seeds)`
+  - 학습 효율: 동일 wall-clock 대비 수렴 에피소드 수
+
+#### [R8] 멀티도메인 학습 시나리오 배치 실험
+
+- **목표**: 단일 도메인 최적화가 아닌 도메인 전이/일반화 성능을 계량화
+- **실험 매트릭스**
+  - Train Domain: `ground`, `air`, `naval`, `multi`
+  - Eval Domain: `ground`, `air`, `naval`, `multi`
+  - Seed: 최소 5개(권장 10개)
+- **분석 산출물**
+  1. 4x4 일반화 성능 매트릭스(평균 ± 표준편차)
+  2. 학습 곡선(에피소드 vs 성능) + 도메인별 수렴 속도
+  3. OOD(Out-of-Domain) 성능 저하율: `in-domain 대비 성능 감소 %`
+
+#### [R9] 위험 민감 평가(CVaR 중심) 기반 하이퍼파라미터 탐색
+
+- **목표**: 평균 성능 최대화와 꼬리위험 최소화 간 균형점 탐색
+- **탐색 파라미터(우선순위)**
+  - `lr`, `clip_range`, `entropy_coef`, `gae_lambda`, `value_coef`
+  - 위험 민감 계수(`risk_alpha`, `cvar_quantile`)를 별도 축으로 관리
+- **평가 방식**
+  1. 각 설정당 다중 seed 롤아웃 수행
+  2. 평균 성능 + `CVaR@10` + 최악 10% 구간 평균을 동시 기록
+  3. Pareto 프런트(Mean vs CVaR)에서 후보군 선별
+- **의사결정 규칙**
+  - 운영 배치 후보는 `평균 성능 하위 5% 이내`이면서 `CVaR 개선폭 상위 30%` 조건을 만족해야 함
+
 **완료 기준 (DoD)**
 - PPO 대비 MAPPO 이점/한계가 정량 리포트로 도출
 - 멀티도메인 일반화 성능 곡선 확보
 - 평균 성능과 최악 10% 성능 간 트레이드오프 맵 확보
+
+### DoD 측정 프로토콜(권장)
+
+1. **비교 공정성 확보**: PPO/MAPPO 동일 seed 세트, 동일 시나리오 분포, 동일 평가 budget 사용
+2. **통계 신뢰성 확보**: 평균값뿐 아니라 95% CI와 효과크기(Cohen's d) 병기
+3. **리스크 관점 반영**: 평균 점수 우위만으로 채택하지 않고 `CVaR@10` 개선 여부를 필수 게이트로 적용
+4. **재현성 보장**: 리포트에 `config hash`, `git sha`, `seed list`, `checkpoint path`를 포함
 
 ---
 
@@ -240,4 +285,3 @@ FALCON은 현재 **구조적으로는 충분히 성숙했고, 기능적으로도
 - [ ] Pareto MC-lite 보정 연결
 - [ ] Phase contract 문서 + CI 계약 테스트
 - [ ] MAPPO 실험 엔트리 1차 개통
-
