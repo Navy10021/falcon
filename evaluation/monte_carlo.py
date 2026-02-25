@@ -10,6 +10,7 @@ Monte Carlo 강건성 평가 (5,000+ 시나리오)
 
 from __future__ import annotations
 import os
+import json
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -177,6 +178,7 @@ class MCEvaluationReport:
     cvar_05: float = 0.0    # 최악 5% 시나리오의 평균 사상자 (Conditional Value at Risk)
     cvar_10: float = 0.0    # 최악 10% 시나리오의 평균 사상자
     cvar_robustness: float = 0.0  # 1 - cvar_10 / max_casualties (0→1, 높을수록 강건)
+    metadata: Dict[str, object] = field(default_factory=dict)
 
 
 class MonteCarloEvaluator:
@@ -424,6 +426,11 @@ class MonteCarloEvaluator:
             cvar_05=cvar_05,
             cvar_10=cvar_10,
             cvar_robustness=cvar_robustness,
+            metadata={
+                "base_seed": self.base_seed,
+                "n_workers": self.n_workers,
+                "checkpoint_path": self.checkpoint_path,
+            },
         )
 
     def _analyze_vulnerability(self, results: List[MCResult]) -> Dict[str, float]:
@@ -441,6 +448,39 @@ class MonteCarloEvaluator:
 
         return {k: float(np.mean(v)) for k, v in ratio_wins.items()
                 if len(v) >= 10}
+
+    @staticmethod
+    def report_to_dict(report: MCEvaluationReport) -> Dict[str, object]:
+        """고정 JSON schema(dict)로 평가 보고서를 직렬화한다."""
+        return {
+            "schema_version": "falcon-mc-report-v1",
+            "metadata": report.metadata,
+            "metrics": {
+                "n_runs": report.n_runs,
+                "blue_win_rate": report.blue_win_rate,
+                "blue_win_rate_ci": list(report.blue_win_rate_ci),
+                "avg_blue_casualties": report.avg_blue_casualties,
+                "avg_blue_casualties_ci": list(report.avg_blue_casualties_ci),
+                "avg_force_reduction": report.avg_force_reduction,
+                "avg_steps": report.avg_steps,
+                "worst_case_casualties": report.worst_case_casualties,
+                "best_case_casualties": report.best_case_casualties,
+                "strategy_robustness": report.strategy_robustness,
+                "cvar_05": report.cvar_05,
+                "cvar_10": report.cvar_10,
+                "cvar_robustness": report.cvar_robustness,
+            },
+            "vulnerability_analysis": report.vulnerability_analysis,
+            "failure_scenarios": report.failure_scenarios,
+        }
+
+    def save_report_json(self, report: MCEvaluationReport, output_path: str) -> str:
+        """평가 보고서를 고정 schema JSON 파일로 저장한다."""
+        payload = self.report_to_dict(report)
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return output_path
 
     def print_report(self, report: MCEvaluationReport):
         """보고서 출력"""

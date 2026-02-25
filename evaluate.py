@@ -6,6 +6,9 @@ AI Combat Optimization System — 평가 스크립트
 """
 
 import argparse
+import datetime
+import json
+import subprocess
 import os
 import sys
 import numpy as np
@@ -14,6 +17,14 @@ import torch
 sys.path.insert(0, os.path.dirname(__file__))
 
 from utils.reproducibility import set_global_seed
+
+
+def _safe_git_sha() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        return "unknown"
+
 
 
 def main():
@@ -37,6 +48,8 @@ def main():
                         help="풀 평가 프리셋 (monte-carlo=5000, workers=4)")
     parser.add_argument("--workers", type=int, default=1,
                         help="병렬 Monte Carlo 워커 수 (기본: 1, 순차)")
+    parser.add_argument("--output-json", type=str, default=None,
+                        help="평가 리포트 JSON 저장 경로")
     args = parser.parse_args()
 
     set_global_seed(args.seed)
@@ -98,7 +111,20 @@ def main():
         show_progress=not args.no_progress,
         max_steps=args.max_steps,
     )
+
+    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    report.metadata.update({
+        "run_id": run_id,
+        "git_sha": _safe_git_sha(),
+        "fog_level": args.fog_level,
+        "max_steps": args.max_steps,
+    })
+
     evaluator.print_report(report)
+
+    if args.output_json:
+        out_path = evaluator.save_report_json(report, args.output_json)
+        print(f"💾 JSON report saved: {out_path}")
 
     # 목표 지표 달성 여부
     print("\n🎯 목표 지표 달성 여부:")

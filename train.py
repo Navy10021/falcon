@@ -28,6 +28,12 @@ def setup_logger(checkpoint_dir: str, run_id: str) -> None:
     """콘솔 + 파일 핸들러를 가진 루트 logger 설정."""
     logger.setLevel(logging.DEBUG)
 
+    # 반복 실행/테스트에서 핸들러 중복 방지
+    if logger.handlers:
+        for h in list(logger.handlers):
+            h.close()
+            logger.removeHandler(h)
+
     fmt = logging.Formatter(
         fmt="%(asctime)s | %(levelname)-8s | %(message)s",
         datefmt="%H:%M:%S",
@@ -740,6 +746,85 @@ def train_phase4(args):
                 np.mean(win_rate_history[-100:]) * 100)
 
 
+
+
+def _safe_git_sha() -> str:
+    """현재 git commit SHA를 안전하게 조회한다."""
+    import subprocess
+
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        return "unknown"
+
+
+def _write_run_manifest(args) -> str:
+    """실험 재현을 위한 run manifest(JSON) 저장."""
+    manifest = {
+        "run_id": args.run_id,
+        "git_sha": _safe_git_sha(),
+        "phase": args.phase,
+        "algorithm": getattr(args, "algorithm", "ppo"),
+        "seed": args.seed,
+        "config_path": args.config,
+        "episodes": args.episodes,
+        "checkpoint_dir": args.checkpoint_dir,
+        "created_at": datetime.datetime.now().isoformat(),
+    }
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
+    out_path = os.path.join(args.checkpoint_dir, f"run_manifest_{args.run_id}.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    return out_path
+
+
+def train_phase2_mappo(args):
+    """Phase 2: MAPPO 최소 실험 경로 (smoke-run)."""
+    logger.info("[Phase 2] MAPPO 최소 실험 경로 시작")
+
+    from ontology.combat_schema import ScenarioFactory, ForceAlignment
+    from simulator.mixed_lanchester import MixedLanchesterEngine
+    from rl_agent.mappo import MAPPOManager
+
+    manager = MAPPOManager(seed=args.seed)
+    engine = MixedLanchesterEngine(seed=args.seed)
+
+    for ep in range(args.episodes):
+        kg = ScenarioFactory.create_standard_scenario(
+            n_blue=np.random.randint(6, 11),
+            n_red=np.random.randint(4, 9),
+            seed=args.seed + ep,
+        )
+        done = False
+
+        for _ in range(30):
+            if done:
+                break
+
+            observations = {}
+            for uid, unit in kg.units.items():
+                if unit.alignment != ForceAlignment.BLUE:
+                    continue
+                observations[uid] = manager.build_unit_observation(unit, kg)
+
+            actions = manager.select_actions(kg)
+            result = engine.run_step_mixed(kg)
+
+            force_before = sum(u.headcount for u in kg.units.values() if u.alignment == ForceAlignment.BLUE)
+            force_after = force_before - int(result.get("blue_casualties", 0))
+            rewards = manager.compute_joint_reward(result, actions, force_before, force_after)
+            global_value = manager.critic.value(np.zeros(64, dtype=np.float32))
+            mission_done = result.get("mission_status", "ongoing") != "ongoing"
+            dones = {uid: mission_done for uid in actions.keys()}
+            manager.store_transitions(observations, actions, rewards, global_value, dones)
+            done = mission_done
+
+        update_stats = manager.happo_update() if done else manager.update()
+        if ep % args.log_interval == 0:
+            logger.info("EP %4d/%d | MAPPO update=%s", ep, args.episodes, update_stats)
+
+    logger.info("[Phase 2] MAPPO 최소 실험 경로 완료")
+
 def main():
     parser = argparse.ArgumentParser(description="AI Combat Optimization System Training")
     parser.add_argument("--phase", type=int, default=1, choices=[1, 2, 3, 4],
@@ -759,6 +844,8 @@ def main():
     parser.add_argument("--save-interval", type=int, default=None, help="저장 간격")
     parser.add_argument("--checkpoint-dir", type=str, default=None, help="체크포인트 저장 경로")
     parser.add_argument("--hitl", action="store_true", help="Phase 3 HITL 통합 루프 활성화")
+    parser.add_argument("--algorithm", type=str, default="ppo", choices=["ppo", "mappo"],
+                        help="Phase 2 알고리즘 선택 (ppo|mappo)")
 
     args = parser.parse_args()
 
@@ -786,12 +873,18 @@ def main():
     if args.config:
         logger.info("Config file: %s", args.config)
 
+    manifest_path = _write_run_manifest(args)
+    logger.info("Run manifest: %s", manifest_path)
+
     set_global_seed(args.seed)
 
     if args.phase == 1:
         train_phase1(args)
     elif args.phase == 2:
-        train_phase2(args)
+        if args.algorithm == "mappo":
+            train_phase2_mappo(args)
+        else:
+            train_phase2(args)
     elif args.phase == 3:
         if not args.hitl:
             logger.warning("Phase 3는 --hitl 옵션과 함께 실행하는 것을 권장합니다.")
