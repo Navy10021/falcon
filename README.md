@@ -58,7 +58,7 @@ FALCON integrates nine major capabilities in one coherent pipeline:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                       FALCON END-TO-END PIPELINE                        │
+│                       FALCON END-TO-END PIPELINE                         │
 └──────────────────────────────────────────────────────────────────────────┘
 
 [0] Intelligence Layer         ontology/intelligence.py
@@ -91,18 +91,18 @@ FALCON integrates nine major capabilities in one coherent pipeline:
            ▼
 [4] Adversarial RL Layer                                    ← EXPANDED P1/P2/P3
     ┌── P1: Population Methods ──────────────────────────────────────────────┐
-    │   rl_agent/psro_oracle     PSRO + α-Rank (NeurIPS 2017 / SA 2019)     │
-    │   rl_agent/nfsp_agent      NFSP BR+AS dual network (NIPS 2016)        │
+    │   rl_agent/psro_oracle     PSRO + α-Rank (NeurIPS 2017 / SA 2019)      │
+    │   rl_agent/nfsp_agent      NFSP BR+AS dual network (NIPS 2016)         │
     │   rl_agent/nfsp_buffer     ReservoirBuffer + CircularBuffer            │
-    │   rl_agent/league_selfplay PFSP · ELO · snapshot league               │
+    │   rl_agent/league_selfplay PFSP · ELO · snapshot league                │
     └────────────────────────────────────────────────────────────────────────┘
     ┌── P2: Multi-Agent Coordination ────────────────────────────────────────┐
     │   rl_agent/mat_policy      MAT autoregressive joint action (NeurIPS 22)│
     │   rl_agent/mappo           MAPPO + HAPPO sequential update             │
     └────────────────────────────────────────────────────────────────────────┘
     ┌── P3: Robustness & Curriculum ─────────────────────────────────────────┐
-    │   rl_agent/rarl            RARL + SA-PPO (ICML 2017 / NeurIPS 2020)   │
-    │   simulator/adversarial_scenario  ACCEL + DomainRandomizer            │
+    │   rl_agent/rarl            RARL + SA-PPO (ICML 2017 / NeurIPS 2020)    │
+    │   simulator/adversarial_scenario  ACCEL + DomainRandomizer             │
     └────────────────────────────────────────────────────────────────────────┘
     rl_agent/blue_agent         PPO Blue (STATE_DIM=128)
     rl_agent/red_agent          Adversarial Red agent
@@ -293,7 +293,7 @@ Key classes: `DomainRandomizer`, `DomainSample`, `AdversarialCurriculum`, `ACCEL
 
 ---
 
-## Quickstart
+## Quick Start
 
 ### Installation
 
