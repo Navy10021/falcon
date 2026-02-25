@@ -27,6 +27,10 @@ tqdm>=4.65.0
 tensorboard>=2.13.0
 rich>=13.0.0
 
+# 노트북 (Notebook)
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
 # 개발/테스트 도구 (Dev/Test Tools)
 pytest>=7.4.0
 # black>=23.0.0
