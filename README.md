@@ -79,7 +79,7 @@ FALCON integrates nine major capabilities in one coherent pipeline:
     simulator/combat_dynamics    BDA · ammo · supply · ElectromagneticEnv
     simulator/fog_of_war         Partial observation + curriculum
     simulator/maneuver_engine    A* path · LOS · flanking judgment
-    simulator/adversarial_scenario   DomainRandomizer + ACCEL curriculum   ← NEW P3
+    simulator/adversarial_scenario   DomainRandomizer + ACCEL curriculum   
            │
            ▼
 [3] Uncertainty Modeling Layer
@@ -581,7 +581,7 @@ falcon/
 ├── simulator/                   Physical combat environment (4,937 LOC)
 │   ├── mixed_lanchester.py          42-type Lanchester engine
 │   ├── combat_dynamics.py           BDA · ammo · supply · EMS
-│   ├── adversarial_scenario.py      ACCEL + DomainRandomizer       ← NEW P3
+│   ├── adversarial_scenario.py      ACCEL + DomainRandomizer       
 │   ├── fog_of_war.py                Partial observation
 │   ├── maneuver_engine.py           A* path · LOS · flanking
 │   ├── naval_engine.py              Maritime engagement
@@ -601,11 +601,11 @@ falcon/
 │   ├── hierarchical_rl.py           Strategic→tactical→action HRL
 │   ├── inverse_rl.py                Max-Entropy IRL
 │   ├── league_selfplay.py           League + PFSP + ELO
-│   ├── psro_oracle.py               PSRO + α-Rank              ← NEW P1
-│   ├── nfsp_agent.py                NFSP BR+AS dual network    ← NEW P1
-│   ├── nfsp_buffer.py               Reservoir + Circular buffer ← NEW P1
-│   ├── mat_policy.py                Multi-Agent Transformer    ← NEW P2
-│   └── rarl.py                      RARL + SA-PPO             ← NEW P3
+│   ├── psro_oracle.py               PSRO + α-Rank              
+│   ├── nfsp_agent.py                NFSP BR+AS dual network    
+│   ├── nfsp_buffer.py               Reservoir + Circular buffer 
+│   ├── mat_policy.py                Multi-Agent Transformer    
+│   └── rarl.py                      RARL + SA-PPO             
 ├── hitl/                        Human-in-the-Loop (2,270 LOC)
 │   ├── natural_language_interface.py   NL → structured constraints
 │   ├── pareto_generator.py              Multi-objective Pareto
