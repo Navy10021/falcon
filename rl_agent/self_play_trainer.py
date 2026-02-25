@@ -315,6 +315,7 @@ class SelfPlayTrainer:
         fog_filter = FogOfWarFilter(fog_level, seed=episode_idx)
         initial_blue_hc = sum(u.headcount for u in kg.units.values()
                               if u.alignment == ForceAlignment.BLUE)
+        prev_blue_hc = initial_blue_hc
 
         blue_total_cas = 0
         red_total_cas  = 0
@@ -386,10 +387,11 @@ class SelfPlayTrainer:
 
             # Blue 버퍼 추가
             blue_reward = blue_agent.compute_reward(
-                step_result, initial_blue_hc,
+                step_result, prev_blue_hc,
                 step_result.blue_total_headcount,
                 avg_uncertainty
             )
+            prev_blue_hc = step_result.blue_total_headcount
             blue_agent.buffer.add(
                 blue_state, blue_action, blue_reward,
                 blue_lp, blue_val, done, avg_uncertainty
