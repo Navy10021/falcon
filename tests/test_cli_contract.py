@@ -43,6 +43,9 @@ def test_cli_contract():
     rc, _ = _run_cmd("python train.py --phase 2 --episodes 1 --algorithm mappo --log-interval 1")
     check("train.py accepts phase 2 mappo route", rc == 0, f"rc={rc}")
 
+    rc, _ = _run_cmd("python train.py --phase 1 --algorithm mappo")
+    check("train.py rejects mappo outside phase 2", rc != 0, f"rc={rc}")
+
     rc, _ = _run_cmd("python train.py --phase 9")
     check("train.py rejects invalid phase", rc != 0, f"rc={rc}")
 

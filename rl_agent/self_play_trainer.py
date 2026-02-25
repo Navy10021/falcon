@@ -590,6 +590,7 @@ class SelfPlayTrainer:
             "resolved_ratio": len(resolved) / max(len(recent), 1),
             "avg_blue_casualties": np.mean([s.blue_casualties for s in recent]),
             "avg_red_casualties":  np.mean([s.red_casualties  for s in recent]),
+            "avg_steps": np.mean([s.n_steps for s in recent]),
             "avg_force_reduction": np.mean([s.blue_force_reduction for s in recent]),
             "final_nash_gap": self.nash_gaps[-1] if self.nash_gaps else None,
             "converged": (self.nash_gaps[-1] < 0.05) if self.nash_gaps else False,
