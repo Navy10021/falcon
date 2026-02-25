@@ -6,6 +6,7 @@ Phase 1 / Phase 2 / Phase 3 선택적 실행
 """
 
 import argparse
+import copy
 import datetime
 import json
 import logging
@@ -415,6 +416,15 @@ def train_phase2(args):
         else:
             logger.info("  %s: %s", k, v)
 
+    return {
+        "episodes": int(final_stats.get("total_episodes", args.episodes)),
+        "win_rate": float(final_stats.get("blue_win_rate", 0.0)),
+        "mission_time": float(final_stats.get("avg_steps", 0.0)),
+        "blue_casualties": float(final_stats.get("avg_blue_casualties", 0.0)),
+        "force_reduction": float(final_stats.get("avg_force_reduction", 0.0)),
+        "stability": float(final_stats.get("pfsp_diversity", 0.0)),
+    }
+
 
 def train_phase3(args):
     """Phase 3: HITL 통합 루프"""
@@ -772,10 +782,96 @@ def _write_run_manifest(args) -> str:
         "created_at": datetime.datetime.now().isoformat(),
     }
     os.makedirs(args.checkpoint_dir, exist_ok=True)
-    out_path = os.path.join(args.checkpoint_dir, f"run_manifest_{args.run_id}.json")
+    out_path = os.path.join(args.checkpoint_dir, "run_manifest.json")
+    legacy_out_path = os.path.join(args.checkpoint_dir, f"run_manifest_{args.run_id}.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
+    with open(legacy_out_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
     return out_path
+
+
+def _to_builtin(value):
+    """numpy/torch 스칼라를 JSON 직렬화 가능한 파이썬 기본 타입으로 변환."""
+    if isinstance(value, dict):
+        return {k: _to_builtin(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_builtin(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.floating, np.integer, np.bool_)):
+        return value.item()
+    return value
+
+
+def _write_phase2_reports(args, algorithm: str, metrics: dict) -> None:
+    """Phase 2 공통 산출물(metrics/evaluation summary) 저장."""
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
+    metrics_payload = {
+        "schema_version": "falcon-phase2-metrics-v1",
+        "run_id": args.run_id,
+        "algorithm": algorithm,
+        "phase": args.phase,
+        "seed": args.seed,
+        "metrics": _to_builtin(metrics),
+    }
+    metrics_path = os.path.join(args.checkpoint_dir, "metrics.json")
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump(metrics_payload, f, ensure_ascii=False, indent=2)
+
+    evaluation_summary = {
+        "schema_version": "falcon-evaluation-summary-v1",
+        "run_id": args.run_id,
+        "algorithm": algorithm,
+        "seed": args.seed,
+        "scenario": "phase2_selfplay",
+        "summary": {
+            "win_rate": metrics.get("win_rate"),
+            "mission_time": metrics.get("mission_time"),
+            "blue_casualties": metrics.get("blue_casualties"),
+            "force_reduction": metrics.get("force_reduction"),
+            "stability": metrics.get("stability"),
+            "episodes": metrics.get("episodes"),
+        },
+    }
+    eval_path = os.path.join(args.checkpoint_dir, "evaluation_summary.json")
+    with open(eval_path, "w", encoding="utf-8") as f:
+        json.dump(evaluation_summary, f, ensure_ascii=False, indent=2)
+    logger.info("Phase2 artifacts saved: %s, %s", metrics_path, eval_path)
+
+
+def _write_phase2_comparison_report(args, ppo_metrics: dict, mappo_metrics: dict) -> None:
+    """동일 seed 설정에서 PPO vs MAPPO 비교 리포트 저장."""
+    keys = ["win_rate", "mission_time", "blue_casualties", "force_reduction", "stability"]
+    rows = []
+    for k in keys:
+        p_val = ppo_metrics.get(k)
+        m_val = mappo_metrics.get(k)
+        delta = None
+        if isinstance(p_val, (int, float)) and isinstance(m_val, (int, float)):
+            delta = m_val - p_val
+        rows.append({"metric": k, "ppo": p_val, "mappo": m_val, "delta_mappo_minus_ppo": delta})
+
+    report = {
+        "schema_version": "falcon-phase2-comparison-v1",
+        "run_id": args.run_id,
+        "seed": args.seed,
+        "episodes": args.episodes,
+        "rows": rows,
+    }
+    out_json = os.path.join(args.checkpoint_dir, "phase2_algorithm_comparison.json")
+    with open(out_json, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+
+    out_md = os.path.join(args.checkpoint_dir, "phase2_algorithm_comparison.md")
+    with open(out_md, "w", encoding="utf-8") as f:
+        f.write("# Phase2 PPO vs MAPPO Comparison\n\n")
+        f.write(f"- run_id: `{args.run_id}`\n- seed: `{args.seed}`\n- episodes: `{args.episodes}`\n\n")
+        f.write("| Metric | PPO | MAPPO | MAPPO-PPO |\n")
+        f.write("|---|---:|---:|---:|\n")
+        for row in rows:
+            f.write(f"| {row['metric']} | {row['ppo']} | {row['mappo']} | {row['delta_mappo_minus_ppo']} |\n")
+    logger.info("Phase2 comparison reports saved: %s, %s", out_json, out_md)
 
 
 def train_phase2_mappo(args):
@@ -789,6 +885,11 @@ def train_phase2_mappo(args):
     manager = MAPPOManager(seed=args.seed)
     engine = MixedLanchesterEngine(seed=args.seed)
 
+    win_history = []
+    mission_times = []
+    blue_casualties = []
+    force_reductions = []
+
     for ep in range(args.episodes):
         kg = ScenarioFactory.create_standard_scenario(
             n_blue=np.random.randint(6, 11),
@@ -796,10 +897,15 @@ def train_phase2_mappo(args):
             seed=args.seed + ep,
         )
         done = False
+        result = {}
+        episode_steps = 0
+        initial_blue_hc = sum(u.headcount for u in kg.units.values() if u.alignment == ForceAlignment.BLUE)
+        prev_blue_hc = initial_blue_hc
 
         for _ in range(30):
             if done:
                 break
+            episode_steps += 1
 
             observations = {}
             for uid, unit in kg.units.items():
@@ -810,20 +916,36 @@ def train_phase2_mappo(args):
             actions = manager.select_actions(kg)
             result = engine.run_step_mixed(kg)
 
-            force_before = sum(u.headcount for u in kg.units.values() if u.alignment == ForceAlignment.BLUE)
-            force_after = force_before - int(result.get("blue_casualties", 0))
+            force_before = prev_blue_hc
+            force_after = max(force_before - int(result.get("blue_casualties", 0)), 0)
             rewards = manager.compute_joint_reward(result, actions, force_before, force_after)
             global_value = manager.critic.value(np.zeros(64, dtype=np.float32))
             mission_done = result.get("mission_status", "ongoing") != "ongoing"
             dones = {uid: mission_done for uid in actions.keys()}
             manager.store_transitions(observations, actions, rewards, global_value, dones)
             done = mission_done
+            prev_blue_hc = force_after
 
         update_stats = manager.happo_update() if done else manager.update()
+        mission_times.append(episode_steps)
+        blue_cas = max(initial_blue_hc - prev_blue_hc, 0)
+        blue_casualties.append(blue_cas)
+        force_reductions.append((initial_blue_hc - prev_blue_hc) / max(initial_blue_hc, 1))
+        mission_status = result.get("mission_status", "ongoing") if isinstance(result, dict) else "ongoing"
+        win_history.append(1.0 if mission_status == "blue_win" else 0.0)
+
         if ep % args.log_interval == 0:
             logger.info("EP %4d/%d | MAPPO update=%s", ep, args.episodes, update_stats)
 
     logger.info("[Phase 2] MAPPO 최소 실험 경로 완료")
+    return {
+        "episodes": args.episodes,
+        "win_rate": float(np.mean(win_history) if win_history else 0.0),
+        "mission_time": float(np.mean(mission_times) if mission_times else 0.0),
+        "blue_casualties": float(np.mean(blue_casualties) if blue_casualties else 0.0),
+        "force_reduction": float(np.mean(force_reductions) if force_reductions else 0.0),
+        "stability": float(np.std(win_history) if win_history else 0.0),
+    }
 
 def main():
     parser = argparse.ArgumentParser(description="AI Combat Optimization System Training")
@@ -846,6 +968,8 @@ def main():
     parser.add_argument("--hitl", action="store_true", help="Phase 3 HITL 통합 루프 활성화")
     parser.add_argument("--algorithm", type=str, default="ppo", choices=["ppo", "mappo"],
                         help="Phase 2 알고리즘 선택 (ppo|mappo)")
+    parser.add_argument("--compare-algorithms", action="store_true",
+                        help="Phase 2에서 동일 seed 기준 PPO vs MAPPO 비교 리포트 생성")
 
     args = parser.parse_args()
 
@@ -867,6 +991,9 @@ def main():
 
     setup_logger(args.checkpoint_dir, run_id)
 
+    if args.phase != 2 and args.algorithm != "ppo":
+        parser.error("--algorithm mappo 는 --phase 2에서만 사용할 수 있습니다.")
+
     logger.info("AI Combat Optimization System v2.0")
     logger.info("run_id=%s | Phase=%d | Episodes=%d | Seed=%d",
                 run_id, args.phase, args.episodes, args.seed)
@@ -881,10 +1008,21 @@ def main():
     if args.phase == 1:
         train_phase1(args)
     elif args.phase == 2:
-        if args.algorithm == "mappo":
-            train_phase2_mappo(args)
+        if args.compare_algorithms:
+            ppo_metrics = train_phase2(args)
+            _write_phase2_reports(args, "ppo", ppo_metrics)
+
+            mappo_args = copy.copy(args)
+            mappo_args.algorithm = "mappo"
+            mappo_metrics = train_phase2_mappo(mappo_args)
+            _write_phase2_reports(args, "mappo", mappo_metrics)
+            _write_phase2_comparison_report(args, ppo_metrics, mappo_metrics)
+        elif args.algorithm == "mappo":
+            mappo_metrics = train_phase2_mappo(args)
+            _write_phase2_reports(args, "mappo", mappo_metrics)
         else:
-            train_phase2(args)
+            ppo_metrics = train_phase2(args)
+            _write_phase2_reports(args, "ppo", ppo_metrics)
     elif args.phase == 3:
         if not args.hitl:
             logger.warning("Phase 3는 --hitl 옵션과 함께 실행하는 것을 권장합니다.")
