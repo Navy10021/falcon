@@ -34,8 +34,14 @@ def test_cli_contract():
     rc, _ = _run_cmd("python evaluate.py --fast --monte-carlo 5 --no-progress")
     check("evaluate.py accepts fast/no-progress options", rc == 0, f"rc={rc}")
 
+    rc, _ = _run_cmd("python evaluate.py --fast --monte-carlo 3 --max-steps 3 --output-json /tmp/falcon_eval.json --no-progress")
+    check("evaluate.py supports --output-json", rc == 0, f"rc={rc}")
+
     rc, _ = _run_cmd("python train.py --phase 3 --episodes 1 --hitl")
     check("train.py accepts phase 3 with --hitl", rc == 0, f"rc={rc}")
+
+    rc, _ = _run_cmd("python train.py --phase 2 --episodes 1 --algorithm mappo --log-interval 1")
+    check("train.py accepts phase 2 mappo route", rc == 0, f"rc={rc}")
 
     rc, _ = _run_cmd("python train.py --phase 9")
     check("train.py rejects invalid phase", rc != 0, f"rc={rc}")

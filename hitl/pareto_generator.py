@@ -9,6 +9,7 @@ Phase 3: Pareto 최적 전략 후보 생성기
 
 from __future__ import annotations
 import math
+import copy
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
@@ -118,6 +119,9 @@ class ParetoStrategyGenerator:
             self.last_generation_all_violated = True
             self.last_generation_note = "모든 후보가 hard constraint를 위반하여 최소 위반 후보를 반환합니다."
             valid_candidates = self._select_min_violation_candidates(candidates)
+
+        # P1-1: top-k 후보에 경량 MC-lite 보정 적용
+        self._apply_mc_lite_calibration(valid_candidates, kg)
 
         # Pareto 프론트 계산
         pareto_front = self._compute_pareto_front(valid_candidates)
@@ -351,6 +355,56 @@ class ParetoStrategyGenerator:
 
         ranked = sorted(candidates, key=violation_penalty)
         return ranked[:max(1, self.n_candidates)]
+
+
+    def _apply_mc_lite_calibration(self, candidates: List[StrategyOption], kg) -> None:
+        """상위 후보 일부에 대해 Monte Carlo-lite 보정치를 반영한다."""
+        if not candidates or self.mc_eval_runs <= 0:
+            return
+
+        ranked = sorted(candidates, key=lambda c: c.win_probability, reverse=True)
+        top_k = max(1, min(3, len(ranked)))
+        for opt in ranked[:top_k]:
+            self._calibrate_candidate_with_mc(kg, opt)
+
+    def _calibrate_candidate_with_mc(self, kg, option: StrategyOption) -> None:
+        """단일 후보에 대해 경량 N-run rollout 기반으로 핵심 지표를 보정한다."""
+        from ontology.combat_schema import ForceAlignment
+        from simulator.lanchester_engine import LanchesterEngine
+
+        wins, casualties, steps = [], [], []
+        n_runs = max(1, self.mc_eval_runs)
+
+        for sim_i in range(n_runs):
+            sim_kg = copy.deepcopy(kg)
+            engine = LanchesterEngine(seed=sim_i)
+
+            # 옵션 병력 규모 반영
+            blue_units = [u for u in sim_kg.units.values() if u.alignment == ForceAlignment.BLUE]
+            total_blue = sum(u.headcount for u in blue_units)
+            if total_blue > 0:
+                scale = min(option.force_size / total_blue, 1.0)
+                for u in blue_units:
+                    u.headcount = max(5, int(u.headcount * scale))
+
+            mission_status = "ongoing"
+            total_blue_cas = 0
+            for step_t in range(max(10, option.expected_time_steps)):
+                res = engine.run_step(sim_kg)
+                total_blue_cas += res.blue_total_casualties
+                mission_status = res.mission_status
+                if mission_status != "ongoing":
+                    steps.append(step_t + 1)
+                    break
+            else:
+                steps.append(max(10, option.expected_time_steps))
+
+            wins.append(1 if mission_status == "blue_win" else 0)
+            casualties.append(total_blue_cas)
+
+        option.win_probability = float(np.mean(wins))
+        option.expected_casualties = int(np.mean(casualties))
+        option.expected_time_steps = int(np.mean(steps))
 
     def display_options(self, options: List[StrategyOption]) -> str:
         """전략 후보 출력 텍스트 생성"""
