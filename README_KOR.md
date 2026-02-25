@@ -56,7 +56,7 @@ FALCON은 9개 핵심 기능을 하나의 통합 파이프라인으로 연결합
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                       FALCON 엔드-투-엔드 파이프라인                      │
+│                       FALCON 엔드-투-엔드 파이프라인                           │
 └──────────────────────────────────────────────────────────────────────────┘
 
 [0] 정보 계층              ontology/intelligence.py
@@ -67,7 +67,7 @@ FALCON은 9개 핵심 기능을 하나의 통합 파이프라인으로 연결합
 [1] 지식·시나리오 계층
     ontology/combat_schema     42 UnitType · 7 Branch · 7 Domain · 19-field Capability
     ontology/joint_operations  C2Link · CommandStructure · JointFiresRequest
-    ontology/scenario_presets  5 프리셋 (한반도방어·공중우세·시가전·다영역·사이버EW)
+    ontology/scenario_presets  5 프리셋 (한반도 방어·공중우세·시가전·다영역·사이버/전자전)
     ontology/roe_ethics        IHL 기반 ROE · EthicalConstraintChecker
     ontology/multidomain       도메인 시너지/억제 효과
            │
@@ -77,7 +77,7 @@ FALCON은 9개 핵심 기능을 하나의 통합 파이프라인으로 연결합
     simulator/combat_dynamics    BDA · 탄약 · 보급 · ElectromagneticEnv
     simulator/fog_of_war         부분 관측 + 커리큘럼
     simulator/maneuver_engine    A* 경로 · LOS · 기동 판정
-    simulator/adversarial_scenario   DomainRandomizer + ACCEL 커리큘럼   ← 신규 P3
+    simulator/adversarial_scenario   DomainRandomizer + ACCEL 커리큘럼   
            │
            ▼
 [3] 불확실성 모델링 계층
@@ -87,20 +87,20 @@ FALCON은 9개 핵심 기능을 하나의 통합 파이프라인으로 연결합
     gnn_model/temperature_scaling ECE 최소화 보정
            │
            ▼
-[4] 적대적 RL 계층                                           ← P1/P2/P3 확장
-    ┌── P1: 집단 기반 자기 대전 ──────────────────────────────────────────┐
-    │   rl_agent/psro_oracle     PSRO + α-Rank (NeurIPS 2017 / SA 2019) │
-    │   rl_agent/nfsp_agent      NFSP BR+AS 이중 네트워크 (NIPS 2016)    │
-    │   rl_agent/nfsp_buffer     ReservoirBuffer + CircularBuffer        │
-    │   rl_agent/league_selfplay PFSP · ELO · 스냅샷 리그               │
-    └─────────────────────────────────────────────────────────────────────┘
+[4] 적대적 RL 계층                                           
+    ┌── P1: 집단 기반 자기 대전 ─────────────────────────────────────────────┐
+    │   rl_agent/psro_oracle     PSRO + α-Rank (NeurIPS 2017 / SA 2019) 
+    │   rl_agent/nfsp_agent      NFSP BR+AS 이중 네트워크 (NIPS 2016)       
+    │   rl_agent/nfsp_buffer     ReservoirBuffer + CircularBuffer        
+    │   rl_agent/league_selfplay PFSP · ELO · 스냅샷 리그               
+    └───────────────────────────────────────────────────────────────────┘
     ┌── P2: 다중 에이전트 조율 ────────────────────────────────────────────┐
-    │   rl_agent/mat_policy      MAT 자기회귀 결합행동 (NeurIPS 2022)     │
-    │   rl_agent/mappo           MAPPO + HAPPO 순차 업데이트              │
-    └─────────────────────────────────────────────────────────────────────┘
-    ┌── P3: 강건성·커리큘럼 ──────────────────────────────────────────────┐
-    │   rl_agent/rarl            RARL + SA-PPO (ICML 2017 / NeurIPS 2020)│
-    │   simulator/adversarial_scenario  ACCEL + DomainRandomizer         │
+    │   rl_agent/mat_policy      MAT 자기회귀 결합행동 (NeurIPS 2022)     
+    │   rl_agent/mappo           MAPPO + HAPPO 순차 업데이트              
+    └─────────────────────────────────────────────────────────────────┘
+    ┌── P3: 강건성·커리큘럼 ──────────────────────────────────────────────────┐
+    │   rl_agent/rarl            RARL + SA-PPO (ICML 2017 / NeurIPS 2020)
+    │   simulator/adversarial_scenario  ACCEL + DomainRandomizer         
     └─────────────────────────────────────────────────────────────────────┘
     rl_agent/blue_agent         PPO Blue (STATE_DIM=128)
     rl_agent/red_agent          적군 PPO
@@ -127,7 +127,7 @@ FALCON은 9개 핵심 기능을 하나의 통합 파이프라인으로 연결합
 
 ---
 
-## 4. 신규 기능 — 적대적 RL 개선 (P1/P2/P3)
+## 4. 신규 기능 — 적대적 RL 개선 
 
 FALCON v4.0은 기존 다중 에이전트 프레임워크 위에 포괄적인 적대적 RL 스위트를 추가합니다.
 
@@ -307,7 +307,7 @@ pip install -e .
 python demo.py
 ```
 
-### 훈련 데이터 생성
+### 훈련 온톨로지 데이터 생성
 
 ```bash
 python generate_data.py                    # 기본 100개 시나리오
@@ -332,7 +332,7 @@ jupyter notebook notebook/FALCON.ipynb
 | `combat_schema.py` | 42 `UnitType`, 7 `BranchType`, 7 `DomainType`, `Capability`(19 필드), `Unit`, `CombatKnowledgeGraph`, `ScenarioFactory` |
 | `military_units.py` | 한국군 현실 편제 병력 규모 상수 테이블 |
 | `joint_operations.py` | `C2Link`, `CommandStructure`, `JointFiresRequest`, `JointOperationsManager` |
-| `scenario_presets.py` | 5개 시나리오 프리셋 — 한반도 방어, 공중우세, 시가전, 다영역, 사이버/EW |
+| `scenario_presets.py` | 5개 시나리오 프리셋 — 한반도 방어, 공중우세, 시가전, 다영역, 사이버/전자전 |
 | `roe_ethics.py` | `RulesOfEngagement`, `EthicalConstraintChecker`, `ROEManager` — IHL 비례성·식별성·필요성 |
 | `intelligence.py` | `INTELReport`, `FogOfWarState`, `ISRAssetModel`(16종), `IntelligenceFusionEngine`(DS이론), `IntelligenceManager` |
 | `multidomain.py` | 도메인 시너지/억제 효과 행렬 |
@@ -374,7 +374,7 @@ kg, c2_mgr = load_scenario("cyber_ew")            # Blue  7 vs Red  6 |  80km, E
 | `fog_of_war.py` | 부분 관측, 탐지 모델링, 커리큘럼 가시성 |
 | `maneuver_engine.py` | A* 경로 탐색, LOS 계산, 우회 기동 판정 |
 | `naval_engine.py` | 해상 교전 역학 |
-| `cyber_effects.py` | 사이버/EW 공격·방어 능력 효과 |
+| `cyber_effects.py` | 사이버/전자전 공격·방어 능력 효과 |
 | `missile_model.py` | 탄도/순항/대함 미사일 교전 모델 |
 | `weather_model.py` | 날씨 영향 (기동력·화력 감쇄) |
 | `resource_manager.py` | 탄약·연료·정비 수명주기 |
@@ -676,7 +676,7 @@ ADP 9대 원칙 자동 평가 + IHL ROE(비례성·식별성·군사적 필요�
 
 Phase 5 (단기 계획) ──────── 예정
   □ 비식별화된 실제 훈련 데이터 연동
-  □ 심리전·영향력 작전 온톨로지
+  □ 심리전·인지전 작전 온톨로지
   □ 기후·환경 요소 온톨로지
   □ 연합작전 온톨로지
   □ LLM 기반 자연어 지휘 고도화
