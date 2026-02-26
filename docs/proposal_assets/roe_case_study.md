@@ -8,8 +8,8 @@
 
 ## 2) 재현 명령어
 ```bash
-python -m falcon.demo --scenario urban_defense --seed 42 --out runs/pr4_roe_on_loss --roe on  --preference loss_min
-python -m falcon.demo --scenario urban_defense --seed 42 --out runs/pr4_roe_off_time --roe off --preference time_min
+python -m demo.demo --scenario urban_defense --seed 42 --out runs/pr4_roe_on_loss --roe on  --preference loss_min
+python -m demo.demo --scenario urban_defense --seed 42 --out runs/pr4_roe_off_time --roe off --preference time_min
 ```
 
 ## 3) 전/후 비교 (Before/After)

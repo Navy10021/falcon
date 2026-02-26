@@ -9,7 +9,7 @@ def test_demo_cli_generates_fixed_artifacts(tmp_path: Path):
     cmd = [
         sys.executable,
         "-m",
-        "falcon.demo",
+        "demo.demo",
         "--scenario",
         "urban_defense",
         "--seed",

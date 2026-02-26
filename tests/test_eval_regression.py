@@ -11,7 +11,7 @@ def test_eval_small_suite_generates_leaderboard(tmp_path):
     cmd = [
         sys.executable,
         "-m",
-        "falcon.evaluate",
+        "demo.evaluate",
         "--suite",
         "small",
         "--seed",

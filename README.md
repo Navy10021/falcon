@@ -1,148 +1,126 @@
-# FALCON (Force-Adaptive Learning for Combat Optimization Network)
+# 🚀 FALCON → DEMO
 
-FALCON은 **전장 의사결정 지원**을 위해 설계된 연구용 프레임워크입니다. 이 저장소는 단일 모델만이 아니라, 아래를 묶은 **통합 실험 스택**을 제공합니다.
+<div align="center">
 
-- 온톨로지 기반 시나리오/전력 모델링
-- 불확실성 인지(Bayesian) GNN 계열 표현
-- 적대적 강화학습(자기대전/리그/강건화)
-- ROE(교전수칙)·HITL·사후분석(AAR) 산출물
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)
+![RL](https://img.shields.io/badge/RL-Adversarial%20%26%20Robust-8A2BE2)
+![GNN](https://img.shields.io/badge/GNN-Bayesian%20Uncertainty-00A3FF)
+![Ontology](https://img.shields.io/badge/Ontology-Knowledge%20Structured-2E8B57)
+![License](https://img.shields.io/badge/License-MIT-green)
 
----
+**Force-Adaptive Learning for Combat Optimization Network**  
+**Ontology + Bayesian GNN + Adversarial RL for commander-centered battlefield decision support**
 
-## TL;DR
-
-- **심사자 5분 이해 포인트**: FALCON은 `시나리오 생성 → 전투 시뮬레이션 → 정책 평가 → 4종 아티팩트 출력`의 파이프라인으로 동작합니다.
-- **5분 실행 포인트**: 아래 Quickstart 명령 1개로 데모를 실행하면 결과 파일 4종이 즉시 생성됩니다.
-- **핵심 산출물 위치**: `runs/proposal_demo/summary.json`, `metrics.csv`, `fig_episode.png`, `aar.html`.
+</div>
 
 ---
 
-## 1) 아키텍처 개요 (Reviewer용)
+## 1) Proposal Background / Goals
 
-FALCON은 다음 6개 계층으로 이해하면 빠릅니다.
+### Idea Name
+**FALCON (Force-Adaptive Learning for combat Optimization Network)**  
+A knowledge-structured, uncertainty-aware, reinforcement-optimized platform designed to improve multi-domain operational decisions with **minimal force, minimal losses, and maximal mission effect**.
 
-1. **Knowledge/Ontology Layer**
-   - `ontology/combat_schema.py`: 부대/전력/지휘 구조 스키마
-   - `ontology/scenario_presets.py`: 표준 시나리오 프리셋
-2. **Simulation Layer**
-   - `simulator/*`: 교전, 소모, 기동, 안개(fog-of-war) 모델
-3. **Representation & Uncertainty Layer**
-   - `gnn_model/*`: 그래프 기반 상태 표현, 불확실성 처리/보정
-4. **Decision/RL Layer**
-   - `rl_agent/*`: PPO·자기대전·리그·강건학습 계열
-5. **Human & Policy Layer**
-   - `hitl/*`: 제약 기반 의사결정 보조 및 인간 최종 판단 흐름
-   - `ontology/roe_ethics.py`: ROE/윤리 규칙 점검
-6. **Evaluation & Reporting Layer**
-   - `evaluation/*`: 성능/강건성 평가
-   - `falcon/report.py`, `falcon/io/artifacts.py`: 보고서/아티팩트 저장
+### Core Value — *The FALCON Approach*
+> **"From force-centric structures to intelligence-centric structures."**
 
-> 즉, FALCON은 “정책 그 자체”보다, **정책을 신뢰 가능하게 검증·보고하기 위한 시스템 아키텍처**에 가깝습니다.
+FALCON is not just automation. It combines:
+- **Ontology-based battlefield knowledge structuring**
+- **Uncertainty perception via Bayesian GNN**
+- **Robust tactical exploration via Adversarial RL**
+- **Human-in-the-loop (HITL) command authority**
+
+### Goals
+1. Multi-objective optimization: *minimum troops · minimum damage · maximum mission success*
+2. Accountable AI operation under commander authority (HITL-first)
+3. Phased deployment path: **simulation → training → constrained operation → expansion**
 
 ---
 
-## 2) Technical Spec (핵심만)
+## 2) Technical Architecture / Concept Diagram
 
-### 입력
-- 시나리오 이름 (`--scenario`)
-- 랜덤 시드 (`--seed`)
-- 정책 모드 (`--policy`)
-
-### 실행 단위
-- 기본 데모는 5개 에피소드의 교전 결과를 누적 계산
-
-### 출력(고정)
-- `summary.json`: 성공률/손실률/ROE 위반률/런타임 요약
-- `metrics.csv`: 에피소드별 상세 메트릭
-- `fig_episode.png`: 에피소드 결과 시각화
-- `aar.html`: 자동 사후분석(AAR) 리포트
-
-### 기본 데모 파라미터
-- Scenario 기본값: `urban_defense`
-- Seed 기본값: `42`
-- Policy 기본값: `rule`
-
----
-
-## 3) Quickstart (3분 데모, 명령 1개)
-
-아래 **한 줄**만 실행하세요.
-
-```bash
-python -m falcon.demo --scenario urban_defense --seed 42 --policy rule --out runs/proposal_demo
+```mermaid
+flowchart LR
+    A[Battlefield Data\nISR, terrain, force status] --> B[Ontology Layer\nEntity/Relation/Constraint Graph]
+    B --> C[Bayesian GNN\nSituation + Uncertainty Estimation]
+    C --> D[Adversarial RL Policy\nRobust Action Search]
+    D --> E[Combat Simulator\nOutcome Rollout / Monte Carlo]
+    E --> F[HITL Decision Interface\nCommander Preferences & ROE]
+    F --> G[Action Recommendation + Rationale\nExplainable Decision Support]
+    G --> H[After Action Review\nMetrics / Reports / Feedback]
+    H --> B
 ```
 
-실행 완료 후:
-- 콘솔에 아티팩트 경로가 출력되고,
-- `runs/proposal_demo/`에 결과 4종이 생성됩니다.
+**Operational concept:** Ontology formalizes context, Bayesian GNN models uncertainty, RL explores resilient actions, and HITL enforces accountable command decisions.
 
 ---
 
-## 4) 공모 제출용 산출물 4종 (파일명/경로 고정)
+## 3) Core Algorithmic Operating Principle
 
-아래 4개는 심사 제출 시 기준 산출물로 고정합니다.
-
-1. `runs/proposal_demo/summary.json`
-2. `runs/proposal_demo/metrics.csv`
-3. `runs/proposal_demo/fig_episode.png`
-4. `runs/proposal_demo/aar.html`
-
----
-
-## 5) 공모 KPI ↔ Metric ↔ Artifact 매핑
-
-| 공모 KPI | 측정 Metric | 기준 Artifact | 해석 포인트 |
-|---|---|---|---|
-| 임무 달성도 | `success_rate` | `summary.json` | 에피소드 성공 비율 |
-| 아군 피해 최소화 | `friendly_loss` | `summary.json`, `metrics.csv` | 평균 피해율 + 회차 분포 |
-| 교전 규범 준수 | `roe_violation_rate`, `roe_violations` | `summary.json`, `metrics.csv` | ROE 위반 빈도 추적 |
-| 전투 효율/운용성 | `runtime_sec`, `duration_sec` | `summary.json`, `metrics.csv` | 처리시간 및 에피소드 지연 |
-| 설명가능성/사후검토 | 정성 점검(리포트 내용) | `aar.html`, `fig_episode.png` | 의사결정 결과의 설명 가능성 |
+1. **Knowledge Encoding (Ontology):** Converts units, missions, doctrine, constraints, and context into machine-reasonable structures.
+2. **Uncertainty-Aware State Estimation (Bayesian GNN):** Predicts risk and confidence under partial observability.
+3. **Robust Policy Optimization (Adversarial RL):** Learns tactics resilient to deception, uncertainty, and worst-case interactions.
+4. **Constraint-Aware Decision Scoring (HITL + ROE):** Re-ranks candidate actions using commander preferences and ethical/ROE constraints.
+5. **Closed-Loop Improvement:** Simulation/evaluation outputs are fed back to improve ontology, policy, and decision quality.
 
 ---
 
-## 6) Reproducibility
+## 4) Core Features / Differentiators
 
-### Seed 고정
-- 권장: `--seed 42` (문서/발표/심사용 공통)
-- 비교 실험: `42, 43, 44` 다중 시드로 평균/분산 보고
+- 🧠 **Ontology-native battlefield reasoning** (not flat feature engineering)
+- 🌫️ **Uncertainty-aware recommendations** (confidence + risk in the loop)
+- ⚔️ **Adversarial robustness** against tactical perturbations
+- 👨‍✈️ **Commander-centered control (HITL)** preserving responsibility chain
+- 📊 **Evaluation-ready pipeline** with Monte Carlo robustness and benchmark scripts
+- 🧾 **Explainability artifacts** for AAR and reproducible analysis
 
-### Suite (권장 검증 루틴)
-1. 데모 실행 (아티팩트 생성 확인)
-2. 단위 테스트 실행
-3. 필요 시 평가 스크립트로 시나리오별 비교
+---
 
-예시:
+## 5) QuickStart
 
 ```bash
-python -m falcon.demo --scenario urban_defense --seed 42 --policy rule --out runs/repro_seed42
-pytest -q
+# 1) Clone
+git clone <your-repo-url>
+cd demo
+
+# 2) Install dependencies
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 3) Run the full demo pipeline
+python demo.py
+
+# 4) Run package demo entrypoint
+python -m demo.demo --scenario urban_defense --seed 42 --policy rule --out runs/demo_urban
+
+# 5) Evaluation
+python evaluate.py --fast
+python -m demo.evaluate --suite small --mc 20 --seed 42 --output-dir runs/eval
 ```
 
-### CPU-only 실행
-- 데모는 CPU 환경에서 동작하도록 설계됨
-- GPU 없이도 아티팩트 생성/검토 가능
-- CI/심사 환경에서는 우선 CPU-only 경로를 기준으로 검증 권장
+---
+
+## Project Layout
+
+- `demo/` — package modules for demo/evaluation/reporting/HITL
+- `ontology/`, `gnn_model/`, `rl_agent/`, `simulator/` — core research components
+- `evaluation/` — Monte Carlo and benchmark utilities
+- `tests/` — regression, contract, smoke, and phase tests
 
 ---
 
-## 7) Proposal Assets 디렉터리 가이드
+## Contributing
 
-기획서 삽입용 리소스는 아래 경로를 사용합니다.
+PRs are welcome for:
+- model quality improvements
+- robustness/evaluation extensions
+- explainability and HITL UX enhancements
 
-- `docs/proposal_assets/architecture.png` (placeholder)
-- `docs/proposal_assets/results_table.md` (placeholder)
-- `docs/proposal_assets/roe_case_study.md` (template)
-- `docs/proposal_assets/calibration.png` (placeholder)
-- `docs/figures/` (추가 도판 저장용)
+Please include reproducible steps and test evidence with every change.
 
 ---
 
-## 8) 권장 심사 시연 시나리오 (5분)
+## License
 
-1. Quickstart 1줄 실행 (1~2분)
-2. `summary.json`에서 KPI 핵심 수치 확인 (1분)
-3. `metrics.csv`/`fig_episode.png`로 회차 추세 설명 (1분)
-4. `aar.html`로 의사결정 근거 및 ROE 준수 설명 (1분)
-
-이 흐름으로 “**실행 가능성 + 평가 가능성 + 설명 가능성**”을 동시에 보여줄 수 있습니다.
+This project is released under the MIT License.

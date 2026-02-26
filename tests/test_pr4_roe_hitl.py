@@ -9,7 +9,7 @@ def _run_demo(out_dir: Path, roe: str, preference: str) -> None:
     cmd = [
         sys.executable,
         "-m",
-        "falcon.demo",
+        "demo.demo",
         "--scenario",
         "urban_defense",
         "--seed",
