@@ -7,9 +7,9 @@ import random
 from pathlib import Path
 from typing import Callable, Dict, List
 
-from falcon.baselines.rule import rule_policy_action
-from falcon.evaluation.metrics import aggregate_policy_metrics
-from falcon.evaluation.suites import EvalScenario, get_suite
+from demo.baselines.rule import rule_policy_action
+from demo.evaluation.metrics import aggregate_policy_metrics
+from demo.evaluation.suites import EvalScenario, get_suite
 
 
 def _resolve_output_dir(out: str) -> Path:
@@ -115,9 +115,9 @@ def main() -> None:
     _write_leaderboard(output_dir / "leaderboard.csv", leaderboard)
     (output_dir / "metrics_aggregate.json").write_text(json.dumps(aggregate_payload, indent=2), encoding="utf-8")
 
-    print(f"[falcon.evaluate] suite={suite.name} mc={args.mc} seed={args.seed}")
-    print(f"[falcon.evaluate] leaderboard={output_dir / 'leaderboard.csv'}")
-    print(f"[falcon.evaluate] aggregate={output_dir / 'metrics_aggregate.json'}")
+    print(f"[demo.evaluate] suite={suite.name} mc={args.mc} seed={args.seed}")
+    print(f"[demo.evaluate] leaderboard={output_dir / 'leaderboard.csv'}")
+    print(f"[demo.evaluate] aggregate={output_dir / 'metrics_aggregate.json'}")
 
 
 if __name__ == "__main__":

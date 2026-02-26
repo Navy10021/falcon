@@ -8,12 +8,12 @@ from typing import Dict, List
 
 from ontology.combat_schema import ForceAlignment, ScenarioFactory
 
-from falcon.hitl.interface import get_preference_profile, score_action
-from falcon.io.artifacts import artifact_paths, ensure_output_dir, write_metrics_csv, write_summary
-from falcon.io.logging import log_info
-from falcon.ontology.constraints import ROEConstraintEvaluator
-from falcon.report import render_aar_html
-from falcon.visualization.plots import save_episode_plot
+from demo.hitl.interface import get_preference_profile, score_action
+from demo.io.artifacts import artifact_paths, ensure_output_dir, write_metrics_csv, write_summary
+from demo.io.logging import log_info
+from demo.ontology.constraints import ROEConstraintEvaluator
+from demo.report import render_aar_html
+from demo.visualization.plots import save_episode_plot
 
 
 @dataclass
