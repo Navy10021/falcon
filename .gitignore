@@ -10,25 +10,28 @@ __pycache__/
 venv/
 env/
 
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pre-commit-cache/
+
 # Distribution / packaging
 dist/
 build/
 *.egg-info/
 *.egg
 
-# Jupyter
-.ipynb_checkpoints/
-
-# Test / coverage
-.pytest_cache/
+# Coverage
 .coverage
 htmlcov/
 
-# Type checking
-.mypy_cache/
+# Jupyter
+.ipynb_checkpoints/
 
-# Model checkpoints & data
+# Model checkpoints & data artifacts
 checkpoints/
+artifacts/
 *.pt
 *.pth
 *.onnx
