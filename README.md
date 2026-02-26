@@ -311,6 +311,19 @@ pip install -e .
 python demo.py
 ```
 
+### One-Command Artifact Demo (CPU-only)
+
+```bash
+python -m falcon.demo --scenario urban_defense --seed 42 --out runs/demo_urban
+```
+
+Fixed output artifacts:
+
+- `runs/demo_urban/summary.json`
+- `runs/demo_urban/metrics.csv`
+- `runs/demo_urban/fig_episode.png`
+- `runs/demo_urban/aar.html`
+
 ### Generate Training Data
 
 ```bash
