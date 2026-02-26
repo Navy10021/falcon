@@ -1,37 +1,16 @@
-# AI Combat Optimization System v2.0
-# 핵심 의존성 (Core Dependencies)
+# Runtime dependencies (CPU-only compatible)
 torch>=2.0.0
 numpy>=1.24.0
 scipy>=1.10.0
 networkx>=3.1
-
-# GNN (Graph Neural Network)
-torch-geometric>=2.3.0
-
-# RL (Reinforcement Learning)
 gymnasium>=0.29.0
 stable-baselines3>=2.0.0
-
-# 시각화 (Visualization)
 matplotlib>=3.7.0
 seaborn>=0.12.0
 plotly>=5.15.0
-
-# 데이터 처리 (Data Processing)
 pandas>=2.0.0
 scikit-learn>=1.3.0
-
-# 유틸리티 (Utilities)
 pyyaml>=6.0
 tqdm>=4.65.0
 tensorboard>=2.13.0
 rich>=13.0.0
-
-# 노트북 (Notebook)
-jupyter>=1.0.0
-ipykernel>=6.0.0
-
-# 개발/테스트 도구 (Dev/Test Tools)
-pytest>=7.4.0
-# black>=23.0.0
-# mypy>=1.0.0
