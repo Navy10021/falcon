@@ -1,4 +1,4 @@
-# 🚀 FALCON → DEMO
+# 🚀 FALCON 
 
 <div align="center">
 
