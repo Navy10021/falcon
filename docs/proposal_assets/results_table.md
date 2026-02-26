@@ -1,9 +1,7 @@
-# Results Table (Placeholder)
+# FALCON Evaluation Summary
 
-> 공모 제출용 정량 성능표를 이 파일에 확정본으로 기입합니다.
-
-| Scenario | Success Rate | Friendly Loss | ROE Violation Rate | Runtime (s) |
-|---|---:|---:|---:|---:|
-| urban_defense | - | - | - | - |
-| coastal_raids | - | - | - | - |
-| air_intercept | - | - | - | - |
+| policy | success_rate | friendly_loss | roe_violation_rate |
+|---|---:|---:|---:|
+| safe_guard | 0.88 | 0.09 | 0.03 |
+| falcon_v1 | 0.88 | 0.11 | 0.02 |
+| baseline | 0.72 | 0.18 | 0.05 |
