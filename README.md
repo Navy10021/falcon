@@ -80,7 +80,7 @@ flowchart LR
 
 ```bash
 # 1) Clone
-git clone <your-repo-url>
+git clone <https://github.com/Navy10021/falcon>
 cd demo
 
 # 2) Install dependencies
