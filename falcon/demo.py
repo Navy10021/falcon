@@ -8,8 +8,10 @@ from typing import Dict, List
 
 from ontology.combat_schema import ForceAlignment, ScenarioFactory
 
+from falcon.hitl.interface import get_preference_profile, score_action
 from falcon.io.artifacts import artifact_paths, ensure_output_dir, write_metrics_csv, write_summary
 from falcon.io.logging import log_info
+from falcon.ontology.constraints import ROEConstraintEvaluator
 from falcon.report import render_aar_html
 from falcon.visualization.plots import save_episode_plot
 
@@ -22,6 +24,13 @@ class EpisodeResult:
     enemy_loss: float
     roe_violations: int
     duration_sec: float
+    event_type: str
+    event_rationale: str
+    selected_action: str
+    civilian_risk: float
+    loss_tradeoff: float
+    time_tradeoff: float
+    decision_score: float
 
 
 def _scenario_blue_advantage(scenario: str) -> float:
@@ -41,7 +50,13 @@ def _rule_policy_action(blue_strength: float, red_strength: float) -> str:
     return "hold"
 
 
-def run_demo_simulation(scenario: str, seed: int, policy: str = "rule") -> List[EpisodeResult]:
+def run_demo_simulation(
+    scenario: str,
+    seed: int,
+    policy: str = "rule",
+    roe_mode: str = "on",
+    preference_mode: str = "balanced",
+) -> List[EpisodeResult]:
     random.seed(seed)
 
     kg = ScenarioFactory.create_standard_scenario(seed=seed)
@@ -53,16 +68,36 @@ def run_demo_simulation(scenario: str, seed: int, policy: str = "rule") -> List[
 
     results: List[EpisodeResult] = []
     scenario_advantage = _scenario_blue_advantage(scenario)
+    roe_checker = ROEConstraintEvaluator(enabled=(roe_mode == "on"), risk_threshold=0.45)
+    preference = get_preference_profile(preference_mode)
+
     for episode in range(1, 6):
         t0 = time.perf_counter()
-        action = _rule_policy_action(blue_strength, red_strength) if policy == "rule" else "fallback"
-        action_bonus = {"assault": 0.05, "hold": 0.02, "fallback": -0.02}[action]
-        win_prob = min(0.95, max(0.05, scenario_advantage + action_bonus + random.uniform(-0.08, 0.08)))
+        proposed_action = _rule_policy_action(blue_strength, red_strength) if policy == "rule" else "fallback"
+
+        civilian_risk = min(0.95, 0.25 + 0.05 * episode + random.uniform(0.0, 0.08))
+        roe_result = roe_checker.evaluate(action=proposed_action, civilian_risk=civilian_risk, target_type="mixed")
+        selected_action = proposed_action if roe_result.allowed else "hold"
+
+        action_bonus = {"assault": 0.05, "hold": 0.02, "fallback": -0.02}[selected_action]
+        base_win_prob = min(0.95, max(0.05, scenario_advantage + action_bonus + random.uniform(-0.08, 0.08)))
+
+        expected_loss = max(0.05, min(0.85, 0.35 - (base_win_prob - 0.5) * 0.25 + random.uniform(-0.03, 0.03)))
+        expected_time = max(0.05, min(0.95, 0.55 - action_bonus * 0.5 + random.uniform(-0.04, 0.04)))
+        mission_gain = max(0.05, min(0.95, base_win_prob + (0.03 if selected_action == "assault" else 0.0)))
+
+        decision_score = score_action(
+            expected_loss=expected_loss,
+            expected_time=expected_time,
+            mission_gain=mission_gain,
+            profile=preference,
+        )
+        win_prob = min(0.97, max(0.03, base_win_prob + (decision_score - 0.5) * 0.12))
         won = random.random() < win_prob
 
-        friendly_loss = max(0.05, min(0.85, 0.32 - (win_prob - 0.5) * 0.28 + random.uniform(-0.05, 0.05)))
-        enemy_loss = max(0.05, min(0.95, 0.35 + (win_prob - 0.5) * 0.30 + random.uniform(-0.05, 0.05)))
-        roe_violations = 0 if action != "assault" else int(random.random() < 0.2)
+        friendly_loss = max(0.05, min(0.85, expected_loss + random.uniform(-0.03, 0.03)))
+        enemy_loss = max(0.05, min(0.95, 0.33 + (win_prob - 0.5) * 0.36 + random.uniform(-0.05, 0.05)))
+        roe_violations = 1 if (selected_action == "assault" and civilian_risk >= 0.5 and roe_mode == "off") else 0
 
         results.append(
             EpisodeResult(
@@ -72,6 +107,13 @@ def run_demo_simulation(scenario: str, seed: int, policy: str = "rule") -> List[
                 enemy_loss=enemy_loss,
                 roe_violations=roe_violations,
                 duration_sec=max(0.01, time.perf_counter() - t0),
+                event_type=roe_result.event_type,
+                event_rationale=roe_result.rationale,
+                selected_action=selected_action,
+                civilian_risk=civilian_risk,
+                loss_tradeoff=expected_loss,
+                time_tradeoff=expected_time,
+                decision_score=decision_score,
             )
         )
 
@@ -87,13 +129,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out", default="runs/demo_urban")
     parser.add_argument("--policy", default="rule", choices=["rule", "fallback"])
+    parser.add_argument("--roe", default="on", choices=["on", "off"])
+    parser.add_argument("--preference", default="balanced", choices=["loss_min", "time_min", "balanced"])
     return parser.parse_args()
 
 
-def _build_summary(scenario: str, seed: int, runtime_sec: float, metrics_rows: List[Dict[str, float]]) -> Dict[str, float]:
+def _build_summary(
+    scenario: str,
+    seed: int,
+    runtime_sec: float,
+    metrics_rows: List[Dict[str, float]],
+    roe_mode: str,
+    preference_mode: str,
+) -> Dict[str, float]:
     success_count = sum(1 for row in metrics_rows if row["outcome"] == "success")
     friendly_loss = sum(float(row["friendly_loss"]) for row in metrics_rows) / len(metrics_rows)
     roe_violation_rate = sum(int(row["roe_violations"]) for row in metrics_rows) / len(metrics_rows)
+    roe_blocked_events = sum(1 for row in metrics_rows if row["event_type"] == "ROE_BLOCKED")
+    avg_loss_tradeoff = sum(float(row["loss_tradeoff"]) for row in metrics_rows) / len(metrics_rows)
+    avg_time_tradeoff = sum(float(row["time_tradeoff"]) for row in metrics_rows) / len(metrics_rows)
     return {
         "scenario": scenario,
         "seed": seed,
@@ -101,6 +155,11 @@ def _build_summary(scenario: str, seed: int, runtime_sec: float, metrics_rows: L
         "friendly_loss": friendly_loss,
         "roe_violation_rate": roe_violation_rate,
         "runtime_sec": runtime_sec,
+        "roe_mode": roe_mode,
+        "preference": preference_mode,
+        "roe_blocked_events": roe_blocked_events,
+        "loss_tradeoff": avg_loss_tradeoff,
+        "time_tradeoff": avg_time_tradeoff,
     }
 
 
@@ -109,9 +168,18 @@ def main() -> None:
     output_dir = ensure_output_dir(args.out)
     artifacts = artifact_paths(output_dir)
 
-    log_info(f"scenario={args.scenario}, seed={args.seed}, policy={args.policy}")
+    log_info(
+        f"scenario={args.scenario}, seed={args.seed}, policy={args.policy}, "
+        f"roe={args.roe}, preference={args.preference}"
+    )
     t0 = time.perf_counter()
-    results = run_demo_simulation(scenario=args.scenario, seed=args.seed, policy=args.policy)
+    results = run_demo_simulation(
+        scenario=args.scenario,
+        seed=args.seed,
+        policy=args.policy,
+        roe_mode=args.roe,
+        preference_mode=args.preference,
+    )
     runtime_sec = time.perf_counter() - t0
 
     metrics_rows = [
@@ -122,10 +190,24 @@ def main() -> None:
             "enemy_loss": r.enemy_loss,
             "roe_violations": r.roe_violations,
             "duration_sec": r.duration_sec,
+            "event_type": r.event_type,
+            "event_rationale": r.event_rationale,
+            "selected_action": r.selected_action,
+            "civilian_risk": r.civilian_risk,
+            "loss_tradeoff": r.loss_tradeoff,
+            "time_tradeoff": r.time_tradeoff,
+            "decision_score": r.decision_score,
         }
         for r in results
     ]
-    summary = _build_summary(args.scenario, args.seed, runtime_sec, metrics_rows)
+    summary = _build_summary(
+        args.scenario,
+        args.seed,
+        runtime_sec,
+        metrics_rows,
+        roe_mode=args.roe,
+        preference_mode=args.preference,
+    )
 
     write_summary(artifacts["summary.json"], summary)
     write_metrics_csv(artifacts["metrics.csv"], metrics_rows)

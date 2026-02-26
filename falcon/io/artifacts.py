@@ -32,19 +32,22 @@ def write_summary(path: Path, summary: Dict[str, float]) -> None:
 
 def write_metrics_csv(path: Path, rows: Iterable[Dict[str, float]]) -> None:
     rows_list: List[Dict[str, float]] = list(rows)
-    headers = ["episode", "outcome", "friendly_loss", "enemy_loss", "roe_violations", "duration_sec"]
+    base_headers = ["episode", "outcome", "friendly_loss", "enemy_loss", "roe_violations", "duration_sec"]
+    extra_headers = []
+    if rows_list:
+        extra_headers = [k for k in rows_list[0].keys() if k not in base_headers]
+    headers = base_headers + extra_headers
     lines = [",".join(headers)]
     for row in rows_list:
+        values = []
+        for header in headers:
+            if header in {"friendly_loss", "enemy_loss", "duration_sec", "loss_tradeoff", "time_tradeoff", "decision_score"}:
+                values.append(f"{float(row[header]):.6f}")
+            elif header in {"episode", "roe_violations"}:
+                values.append(str(int(row[header])))
+            else:
+                values.append(str(row[header]))
         lines.append(
-            ",".join(
-                [
-                    str(row["episode"]),
-                    str(row["outcome"]),
-                    f"{float(row['friendly_loss']):.6f}",
-                    f"{float(row['enemy_loss']):.6f}",
-                    str(int(row["roe_violations"])),
-                    f"{float(row['duration_sec']):.6f}",
-                ]
-            )
+            ",".join(values)
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
