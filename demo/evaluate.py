@@ -16,7 +16,7 @@ def _resolve_output_dir(out: str) -> Path:
     out_path = Path(out)
     if out_path.is_absolute():
         return out_path
-    if out_path.parts and out_path.parts[0] == "outputs":
+    if out_path.parts and out_path.parts[0] in {"outputs", "runs"}:
         return out_path
     return Path("outputs") / out_path
 
@@ -80,7 +80,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--suite", default="small", choices=["small", "standard", "stress"])
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--mc", type=int, default=200, help="Monte Carlo runs per scenario")
-    parser.add_argument("--out", default="outputs/eval_small")
+    parser.add_argument("--out", "--output-dir", dest="out", default="outputs/eval_small")
     return parser.parse_args()
 
 

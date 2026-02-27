@@ -81,7 +81,7 @@ flowchart LR
 ```bash
 # 1) Clone
 git clone https://github.com/Navy10021/falcon
-cd demo
+cd falcon
 
 # 2) Install dependencies
 python -m venv .venv
