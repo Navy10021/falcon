@@ -26,8 +26,21 @@ def _safe_git_sha() -> str:
         return "unknown"
 
 
+def _recover_workdir_if_needed() -> None:
+    """Recover to repository root when current working directory is unavailable."""
+    try:
+        os.getcwd()
+        return
+    except OSError:
+        repo_root = os.path.dirname(os.path.abspath(__file__))
+        os.chdir(repo_root)
+        print(f"⚠️ 작업 디렉터리에 접근할 수 없어 저장소 루트로 이동했습니다: {repo_root}")
+
+
 
 def main():
+    _recover_workdir_if_needed()
+
     parser = argparse.ArgumentParser(description="AI Combat Evaluation")
     parser.add_argument("--checkpoint", type=str, default=None, help="Blue Agent 체크포인트 경로")
     parser.add_argument("--monte-carlo", type=int, default=500, help="Monte Carlo 실행 횟수")
