@@ -1,4 +1,4 @@
-# 🚀 FALCON 
+# 🦅 FALCON : **F**orce-**A**daptive **L**earning for **C**ombat **O**ptimization **N**etwork  
 
 <div align="center">
 
@@ -7,8 +7,7 @@
 ![GNN](https://img.shields.io/badge/GNN-Bayesian%20Uncertainty-00A3FF)
 ![Ontology](https://img.shields.io/badge/Ontology-Knowledge%20Structured-2E8B57)
 ![License](https://img.shields.io/badge/License-MIT-green)
-
-**Force-Adaptive Learning for Combat Optimization Network**  
+  
 **Ontology + Bayesian GNN + Adversarial RL for commander-centered battlefield decision support**
 
 </div>
