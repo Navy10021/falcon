@@ -1,6 +1,6 @@
 <div align="center">
 
-# FALCON: 전투 최적화를 위한 적응형 학습 네트워크
+# 🦅 FALCON : 
 
 ### *다영역 온톨로지 기반 Bayesian GNN + 적대적 강화학습 + Human-in-the-Loop 전투 의사결정 지원*
 
