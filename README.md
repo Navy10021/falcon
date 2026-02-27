@@ -1,83 +1,91 @@
 # FALCON (Force-Adaptive Learning for Combat Optimization Network)
 
-*A modular research repository for ontology-driven combat simulation, uncertainty-aware graph modeling, adversarial RL, and human-in-the-loop decision support.*
+*Ontology-driven combat simulation and decision-support research stack combining simulation, GNN uncertainty modeling, RL training, HITL controls, and evaluation tooling.*
 
 ## Badge suggestions
-
-> Suggested badges (replace links/usernames as needed):
-
-- `CI` (GitHub Actions): `.github/workflows/ci.yml`
-- `Python` version compatibility (from `setup.py` / CI)
-- `License: MIT` (from `LICENSE`)
-- `Tests` status (pytest in CI)
-
-Example markdown:
 
 ```md
 [![CI](https://github.com/Navy10021/falcon/actions/workflows/ci.yml/badge.svg)](https://github.com/Navy10021/falcon/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Code Style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 ```
 
-## TL;DR
+## 🚀 TL;DR / Executive Summary
 
-- **What this is:** a Python research stack that combines ontology modules, simulation engines, GNN uncertainty modeling, RL agents, HITL components, and evaluation tooling.
-- **How to run quickly:** install dependencies, run `python demo.py` or `python -m demo.demo ...`, then evaluate via `python evaluate.py --fast`.
-- **Why it is useful:** the repository includes not just model code, but also scenario generation, reporting artifacts, tests, and CI for reproducible experimentation.
+FALCON is an end-to-end experimentation repository for military-domain AI research workflows:
+
+- **Knowledge modeling:** ontology-backed scenario and doctrine representation (`ontology/`).
+- **Environment dynamics:** combat engines with fog-of-war, maneuver, and resource constraints (`simulator/`).
+- **Learning stack:** Bayesian/temporal GNN components and multiple RL paradigms (`gnn_model/`, `rl_agent/`).
+- **Decision governance:** ROE, constraints, preference modeling, and HITL intervention (`hitl/`, `ontology/roe_ethics.py`).
+- **Evaluation and reporting:** Monte Carlo, benchmark hooks, metrics, demo artifacts, and test coverage (`evaluation/`, `demo/`, `tests/`).
+
+This repository is structured for **research-to-prototype iteration** rather than a single model benchmark.
+
+## 📌 Highlights / At a Glance
+
+| Area | What is present in this repository |
+|---|---|
+| Core scripts | `train.py`, `evaluate.py`, `demo.py`, `generate_data.py` |
+| Configuration | Phase/evaluation/scenario YAMLs under `configs/` |
+| Models/agents | Bayesian GNN, PPO variants, MAPPO/MAT/NFSP/PSRO modules |
+| Human oversight | Constraint parsing, preference learning, Pareto/reranking modules |
+| Evaluation outputs | JSON/CSV summaries, plots, AAR HTML (demo path) |
+| Reproducibility | Seeded CLI flows, pytest suite, GitHub Actions CI |
 
 ## Why this repository matters
 
-FALCON is organized as an **end-to-end experimentation environment**, not a single algorithm repository. It includes:
+Many repositories focus on isolated algorithm performance. FALCON instead keeps **scenario modeling, simulation realism, agent training, decision constraints, and evaluation artifacts** in one codebase. That organization is useful for:
 
-- domain modeling (`ontology/`),
-- environment dynamics (`simulator/`),
-- learning components (`gnn_model/`, `rl_agent/`),
-- decision constraints and preference components (`hitl/`),
-- evaluation and benchmark utilities (`evaluation/`, `demo/evaluation/`),
-- reporting and explainability helpers (`explainability/`, `demo/report.py`),
-- regression tests and CI (`tests/`, `.github/workflows/ci.yml`).
+1. testing ideas across full pipelines,
+2. comparing algorithmic variants under common simulation assumptions,
+3. producing inspectable artifacts suitable for review and iteration.
 
-This structure makes it suitable for teams that need to iterate across modeling, training, evaluation, and reporting in one codebase.
-
-## System architecture / core modules
+## 🏗️ System architecture / core modules
 
 ```mermaid
 flowchart LR
   O[ontology/] --> S[simulator/]
+  O --> H[hitl/]
   S --> G[gnn_model/]
   S --> R[rl_agent/]
-  O --> H[hitl/]
   G --> R
   R --> E[evaluation/]
   H --> E
-  E --> X[explainability/ + visualization/ + demo/report.py]
+  E --> X[explainability/ + visualization/ + demo/]
 ```
 
-### Core module roles
+### Module responsibilities
 
-- **`ontology/`**: combat schema, doctrine encoding, scenario presets/loading, ROE/ethics checks, temporal/intelligence extensions.
-- **`simulator/`**: lanchester engines, mixed combat dynamics, maneuver, fog-of-war, missile/weather/resource/cyber effects.
-- **`gnn_model/`**: Bayesian/temporal graph components, uncertainty helpers, calibration utilities.
-- **`rl_agent/`**: blue/red agents, self-play trainer, robust/adversarial and multi-agent variants (e.g., RARL, league self-play, MAPPO/MAT/NFSP modules).
-- **`hitl/`**: constraint parsing, preference learning, Pareto candidate generation, reward adaptation, replanning.
-- **`evaluation/`**: Monte Carlo evaluation, adversarial/historical benchmark helpers, metric utilities.
-- **`demo/`**: lightweight runnable pipeline with fixed artifacts and compact evaluation suites.
-- **`tests/`**: CLI contract checks, numerical stability, phase/tier regression tests.
+- **`ontology/`**: combat schema, doctrine encoding, multidomain links, scenario presets/loaders, ROE/ethics.
+- **`simulator/`**: Lanchester and mixed combat engines, maneuver/fog/weather/cyber/resource effects.
+- **`gnn_model/`**: Bayesian HGT, temporal GNN, uncertainty decomposition and calibration.
+- **`rl_agent/`**: blue/red agents, self-play, RARL, MAPPO, MAT, NFSP, PSRO, league training utilities.
+- **`hitl/`**: constraints, preference learning/adaptation, Pareto candidate generation, replanning.
+- **`evaluation/`**: Monte Carlo evaluation, benchmark adapters, metric helpers.
+- **`explainability/` + `visualization/`**: AAR/counterfactual/attention and runtime dashboard support.
+- **`demo/`**: compact runnable pipeline and lightweight evaluation/reporting path.
 
-## Key capabilities
+## 🧠 Key capabilities
 
-Implemented capabilities in the current repository include:
+### Implemented (verified from code layout and scripts)
 
-1. **Ontology-backed scenario construction** through `ScenarioFactory` and related schema utilities.
-2. **Fog-of-war and uncertainty-aware modeling** in simulator + GNN components.
-3. **Multiple RL training routes** (phase-oriented training, self-play path, optional MAPPO path in phase 2).
-4. **HITL-oriented strategy filtering/re-ranking** via constraints and Pareto candidate generation.
-5. **Two evaluation paths**:
-   - main evaluator (`evaluate.py`) with Monte Carlo and optional historical benchmark mode,
-   - demo evaluator (`python -m demo.evaluate`) that emits leaderboard and aggregate metrics.
-6. **Artifact-oriented demo outputs** (`summary.json`, `metrics.csv`, `fig_episode.png`, `aar.html`).
+- Ontology-based scenario creation and schema abstractions.
+- Multi-engine simulation with fog-of-war and dynamics extensions.
+- Phase-oriented training entrypoint (`--phase` in `train.py`) with optional algorithm comparison in phase 2.
+- Two evaluation surfaces:
+  - root-level evaluator (`evaluate.py`),
+  - demo evaluation suites (`python -m demo.evaluate`).
+- Data generation pipeline producing scenario/episode/IRL summary datasets.
+- Artifact-producing demo flow (`summary.json`, `metrics.csv`, `fig_episode.png`, `aar.html`).
+- Automated tests and CI lint/test workflow.
 
-## Repository structure
+### Research-oriented but maturity varies
+
+Some modules are clearly prototyping-oriented (large single-file trainers, mixed Korean/English comments, evolving packaging conventions). Treat the repository as a **serious experimental platform**, not a finalized product package.
+
+## 📁 Repository structure
 
 ```text
 falcon/
@@ -98,7 +106,7 @@ falcon/
 │   ├── phase2.yaml
 │   ├── phase3.yaml
 │   ├── evaluation.yaml
-│   └── scenarios/
+│   └── scenarios/*.yaml
 ├── ontology/
 ├── simulator/
 ├── gnn_model/
@@ -113,9 +121,9 @@ falcon/
 └── .github/workflows/ci.yml
 ```
 
-## Installation
+## ⚙️ Installation
 
-### 1) Clone and create environment
+### 1) Clone and create a virtual environment
 
 ```bash
 git clone https://github.com/Navy10021/falcon
@@ -124,113 +132,113 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-### 2) Install runtime dependencies
+### 2) Install dependencies
 
 ```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 3) (Optional) install development tools
+### 3) Optional development dependencies
 
 ```bash
 pip install -r requirements-dev.txt
 ```
 
-## Quick start
+## 🛠️ Quick start
 
-### Option A: full root demo
+### Root demo
 
 ```bash
 python demo.py --seed 42
 ```
 
-### Option B: compact demo module with fixed artifacts
+### Package-style demo pipeline
 
 ```bash
 python -m demo.demo --scenario urban_defense --seed 42 --policy rule --out runs/demo_urban
 ```
 
-### Quick evaluation
+### Fast evaluation
 
 ```bash
 python evaluate.py --fast
 python -m demo.evaluate --suite small --mc 20 --seed 42 --out outputs/eval_small
 ```
 
-## End-to-end workflow
+## ✅ End-to-end workflow
 
-A practical workflow supported by the repository:
+```bash
+# 1) Generate data artifacts
+python generate_data.py --quick
 
-1. **Generate synthetic datasets** for scenario/episode/IRL summaries:
-   ```bash
-   python generate_data.py --quick
-   ```
-2. **Train by phase** (configurable via CLI or YAML):
-   ```bash
-   python train.py --phase 1 --config configs/phase1.yaml
-   python train.py --phase 2 --config configs/phase2.yaml
-   python train.py --phase 3 --hitl --config configs/phase3.yaml
-   ```
-3. **Run evaluation**:
-   ```bash
-   python evaluate.py --monte-carlo 200 --fog-level moderate --output-json runs/eval_report.json
-   ```
-4. **Review artifacts and reports** (`runs/`, `outputs/`, `data/`, and demo AAR HTML).
+# 2) Train by phase
+python train.py --phase 1 --config configs/phase1.yaml
+python train.py --phase 2 --config configs/phase2.yaml
+python train.py --phase 3 --hitl --config configs/phase3.yaml
+
+# 3) Evaluate
+python evaluate.py --monte-carlo 200 --fog-level moderate --output-json runs/eval_report.json
+
+# 4) Optional demo suite eval
+python -m demo.evaluate --suite standard --mc 100 --seed 0 --out outputs/eval_standard
+```
 
 ## Configuration
 
-Configuration is defined in YAML files under `configs/` and can be overridden by CLI arguments.
+- Core defaults: `configs/default.yaml`
+- Phase defaults: `configs/phase1.yaml`, `configs/phase2.yaml`, `configs/phase3.yaml`
+- Evaluation defaults: `configs/evaluation.yaml`
+- Scenario presets: `configs/scenarios/*.yaml`
 
-- `configs/default.yaml`: default training/evaluation values.
-- `configs/phase1.yaml`, `phase2.yaml`, `phase3.yaml`: phase-specific training defaults.
-- `configs/evaluation.yaml`: evaluation defaults.
-- scenario-specific presets under `configs/scenarios/`.
+`train.py` supports `--config` plus CLI overrides for key hyperparameters (episodes, lr, seed, intervals, algorithm mode, etc.).
 
-`train.py` supports `--config` and fills unspecified CLI options from YAML.
+## 📊 Evaluation / metrics
 
-## Evaluation / metrics
+### Root evaluator (`evaluate.py`)
 
-### Main evaluation path (`evaluate.py`)
+Key options include:
 
-- Monte Carlo evaluation (`--monte-carlo`, `--workers`, `--fog-level`, `--max-steps`)
-- `--fast` and `--full` presets
-- optional JSON export via `--output-json`
-- optional historical benchmark route via `--benchmark historical`
+- `--monte-carlo`, `--workers`, `--max-steps`
+- `--fog-level {clear,moderate,maximum}`
+- `--fast` / `--full`
+- `--benchmark historical` with `--benchmark-runs`
+- `--output-json <path>`
 
-### Demo evaluation path (`demo.evaluate`)
+### Demo evaluator (`demo.evaluate`)
 
-- suite-based runs (`small`, `standard`, `stress`)
-- outputs:
+- Suites: `small`, `standard`, `stress`
+- Outputs:
   - `leaderboard.csv`
   - `metrics_aggregate.json`
 
-### Metric utilities
+### Metric helpers
 
-`evaluation/metrics.py` provides reusable metrics (force reduction rate, exchange ratio, mission efficiency, moving averages).
+`evaluation/metrics.py` contains reusable functions for force reduction, exchange ratio, mission efficiency, and trend-style summaries.
 
-## Explainability / HITL / ontology components
+## 🔬 Explainability / HITL / ontology components
 
-- **Explainability (`explainability/`)**: attention visualization, automatic AAR utilities, counterfactual analysis modules.
-- **HITL (`hitl/`)**: preference learner, Pareto strategy generator, natural-language interface and constraint parser.
-- **Ontology (`ontology/`)**: schema, doctrine, multidomain structures, ROE/ethics checks, scenario presets/loaders.
+- **Explainability (`explainability/`)**: attention visualization, counterfactual tools, AAR helpers.
+- **HITL (`hitl/`)**: constraint parser, preference learner/adapters, Pareto generators, replanning tools.
+- **Ontology (`ontology/`)**: combat schema, doctrine and multidomain structures, scenario presets/loaders, ROE/ethics validators.
 
-These are integrated in both root-level scripts and the `demo/` package workflows.
+These modules support policy outputs that can be constrained, interpreted, and reviewed rather than used as opaque model scores.
 
-## Example outputs or expected artifacts
+## 🧪 Example outputs or expected artifacts
 
-### `python -m demo.demo ...` expected artifacts
+### `python -m demo.demo ...`
 
 - `summary.json`
 - `metrics.csv`
 - `fig_episode.png`
 - `aar.html`
 
-### `python -m demo.evaluate ...` expected artifacts
+### `python -m demo.evaluate ...`
 
 - `leaderboard.csv`
 - `metrics_aggregate.json`
 
-### `python generate_data.py ...` expected artifacts
+### `python generate_data.py ...`
 
 - `data/scenarios.json`
 - `data/episodes.json`
@@ -240,57 +248,56 @@ These are integrated in both root-level scripts and the `demo/` package workflow
 
 ## Development & testing
 
-### Local checks
-
 ```bash
 ruff check .
 black --check .
 pytest -q
 ```
 
-### Helper scripts
+Helper scripts:
 
 ```bash
 bash scripts/format.sh
 bash scripts/test.sh
 ```
 
-### CI
-
-GitHub Actions workflow (`.github/workflows/ci.yml`) runs lint + tests on push/PR.
+CI is defined in `.github/workflows/ci.yml` and runs lint + tests on push/PR.
 
 ## Documentation
 
-- **English README**: this file (`README.md`) should be treated as the primary high-level technical entrypoint.
-- **Korean README**: `README_KOR.md` provides a Korean-language project narrative and extended context.
-- **Project structure notes**: `docs/PROJECT_STRUCTURE.md`.
-- **Demo-focused usage**: `demo/DEMO_README.md`.
-- **Additional reports/analysis**: `docs/report/` and `docs/reports/`.
+- **English primary README:** `README.md` (this file).
+- **Korean README:** `README_KOR.md` (Korean-language project narrative and deeper context).
+- **Contributing guide:** `CONTRIBUTING.md`.
+- **Demo-specific guide:** `demo/DEMO_README.md`.
+- **Structure policy:** `docs/PROJECT_STRUCTURE.md`.
+- **Additional reports:** `docs/report/`, `docs/reports/`, `docs/proposal_assets/`.
 
 ## Contributing
 
-See `CONTRIBUTING.md` for contribution guidance and expectations. Typical contribution areas:
+Please follow `CONTRIBUTING.md` for contribution expectations, test discipline, and PR workflow.
 
-- simulator and environment realism,
-- algorithmic improvements in GNN/RL modules,
-- evaluation/reporting robustness,
-- tests and reproducibility infrastructure.
+Practical high-impact contribution areas:
+
+- simulation fidelity and calibration,
+- RL algorithm stability and benchmarking,
+- HITL policy and constraint design,
+- test coverage and experiment reproducibility,
+- documentation cleanup and packaging consistency.
 
 ## Roadmap
 
-### Implemented (verified in repository)
+### Implemented baseline
 
-- phase-oriented training/evaluation scripts,
-- ontology/simulator/GNN/RL/HITL module layout,
-- test suite + CI,
-- demo/evaluation artifact pipelines.
+- End-to-end scripts for training/evaluation/demo/data generation.
+- Modular domains for ontology, simulation, GNN, RL, HITL, evaluation, explainability.
+- Multi-layer test suite and CI integration.
 
-### Future work (inferred from current structure/docs)
+### Near-term improvements (inferred from current structure/docs)
 
-- stronger packaging consistency and command unification,
-- expanded benchmark baselines and standardized experiment cards,
-- additional documentation cleanup between English/Korean/readme variants,
-- continued hardening of reproducibility metadata across runs.
+- Package naming consistency (root scripts vs package-style invocation patterns).
+- More explicit experiment cards (seed grids, config snapshots, artifact schema standards).
+- Additional baseline comparators and standardized benchmark tables.
+- Continued refactoring of large training/evaluation files into smaller modules.
 
 ## License
 
