@@ -1,4 +1,4 @@
-# 🦅 FALCON (Force-Adaptive Learning for Combat Optimization Network)
+# 🦅 FALCON : Force-Adaptive Learning for Combat Optimization Network
 
 *Ontology-driven combat simulation and decision-support research stack combining simulation, GNN uncertainty modeling, RL training, HITL controls, and evaluation tooling.*
 
