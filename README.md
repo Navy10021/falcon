@@ -41,64 +41,64 @@ This repository is designed for research and prototyping workflows such as:
 
 ---
 
-## Technical Stack (구현 기술 스택)
+## Technical Stack
 
-FALCON은 “아이디어 제안” 단계가 아닌, 실제 실험/검증 루프를 빠르게 돌릴 수 있도록 아래와 같은 기술 조합으로 구성됩니다.
+FALCON is designed not as a concept-only proposal, but as an end-to-end stack for rapidly iterating through practical experimentation and validation loops.
 
 ### Core Runtime & ML
 
-- **Python 3.10+**: 실험 코드, 시뮬레이터, 평가 파이프라인 전체를 통합.
-- **PyTorch 2.x**: Bayesian GNN, 정책 네트워크, 학습 루프 구현.
-- **NumPy / SciPy**: 수치 계산, 분포/샘플링, 통계 기반 평가.
-- **scikit-learn**: 보정(calibration), 분석/메타 모델 보조.
+- **Python 3.10+**: Unifies experiment code, simulator logic, and evaluation pipelines.
+- **PyTorch 2.x**: Implements Bayesian GNNs, policy networks, and training loops.
+- **NumPy / SciPy**: Provides numerical computing, distribution sampling, and statistical evaluation.
+- **scikit-learn**: Supports calibration and auxiliary analysis/meta-modeling tasks.
 
 ### RL & Decision Intelligence
 
-- **Gymnasium**: 실험 가능한 전장 환경 인터페이스 표준화.
-- **Stable-Baselines3**: PPO 계열 기반의 빠른 베이스라인 확보.
-- **Custom Adversarial RL Modules**: RARL, self-play, NFSP, MAPPO, league/PSRO 확장.
+- **Gymnasium**: Standardizes interfaces for experimentation-ready battlefield environments.
+- **Stable-Baselines3**: Enables quick PPO-family baseline establishment.
+- **Custom Adversarial RL Modules**: Supports RARL, self-play, NFSP, MAPPO, and league/PSRO extensions.
 
 ### Knowledge / Graph / Ontology Layer
 
-- **Domain Ontology Modules (`ontology/`)**: 병과/임무/지휘관계/교전규칙 구조화.
-- **Graph-centric Reasoning (`gnn_model/`)**: 부분 관측 상황에서 관계 기반 추론.
-- **Constraint Encoding (ROE/HITL)**: 인간 지휘 의도와 제약을 정책 선택에 직접 반영.
+- **Domain Ontology Modules (`ontology/`)**: Structure unit types, missions, command relationships, and rules of engagement.
+- **Graph-centric Reasoning (`gnn_model/`)**: Perform relation-based inference under partial observability.
+- **Constraint Encoding (ROE/HITL)**: Directly inject commander intent and constraints into policy selection.
 
 ### Evaluation, Ops, and Reproducibility
 
-- **YAML Config System (`configs/`)**: 시나리오/평가/학습 설정의 선언적 관리.
-- **Monte Carlo & Benchmark Suite (`evaluation/`, `demo/evaluation/`)**: 강건성 및 일반화 성능 검증.
-- **PyTest-based Regression Gates (`tests/`)**: 단계별 계약 테스트 및 수치 안정성 점검.
-- **TensorBoard / Rich / Plotly / Matplotlib / Seaborn**: 학습 추적, 리포팅, 시각화.
+- **YAML Config System (`configs/`)**: Declaratively manages scenario, evaluation, and training settings.
+- **Monte Carlo & Benchmark Suite (`evaluation/`, `demo/evaluation/`)**: Validates robustness and generalization performance.
+- **PyTest-based Regression Gates (`tests/`)**: Enforces staged contract tests and numerical stability checks.
+- **TensorBoard / Rich / Plotly / Matplotlib / Seaborn**: Covers training tracking, reporting, and visualization.
 
 ---
 
 ## Why FALCON: Differentiation & Feasibility
 
-### 1) 차별성 (Differentiation)
+### 1) Differentiation
 
-1. **Ontology + Bayesian GNN + Adversarial RL + HITL의 단일 파이프라인 통합**  
-   기존 접근이 규칙기반, 순수 RL, 혹은 단일 상황판단에 머무는 반면 FALCON은 지식표현·불확실성·강건학습·지휘자 제약을 연동합니다.
+1. **Single-pipeline integration of Ontology + Bayesian GNN + Adversarial RL + HITL**  
+   While many approaches remain rule-based, pure RL, or narrowly focused on isolated situation assessment, FALCON links knowledge representation, uncertainty modeling, robust learning, and commander constraints in one flow.
 
-2. **정확도 중심이 아닌 “신뢰 가능한 추천” 중심 설계**  
-   확률적 신뢰도(uncertainty), 정책 강건성, ROE 제약 준수 여부를 함께 평가해 실전형 의사결정 보조에 맞춥니다.
+2. **Design centered on trustworthy recommendations rather than raw accuracy**  
+   It jointly evaluates probabilistic confidence (uncertainty), policy robustness, and ROE compliance for operationally realistic decision support.
 
-3. **실험 가능성과 설명 가능성을 동시에 고려한 구조**  
-   재현 가능한 시나리오/시드 기반 평가와 함께 AAR/해석 모듈을 둬서 결과를 “왜 그런 추천이 나왔는지” 추적할 수 있습니다.
+3. **Architecture that balances experimentability and explainability**  
+   Reproducible scenario/seed-based evaluation is paired with AAR/interpretability modules so teams can trace why recommendations were produced.
 
-### 2) 실현 가능성 (Feasibility)
+### 2) Feasibility
 
-1. **이미 분리된 모듈 아키텍처**  
-   `ontology`, `gnn_model`, `rl_agent`, `simulator`, `hitl`, `evaluation`로 분해되어 병렬 개발 및 단계적 고도화가 용이합니다.
+1. **Already modular architecture**  
+   The system is decomposed into `ontology`, `gnn_model`, `rl_agent`, `simulator`, `hitl`, and `evaluation`, enabling parallel development and staged upgrades.
 
-2. **점진적 적용 전략이 가능**  
-   Rule baseline → RL baseline → adversarial/self-play → HITL 재정렬 순으로 성능과 안정성을 단계적으로 검증할 수 있습니다.
+2. **Supports a progressive adoption strategy**  
+   Teams can validate performance and stability incrementally using a path such as Rule baseline → RL baseline → adversarial/self-play → HITL reranking.
 
-3. **검증 친화적 실험 체계 내장**  
-   CLI 실행 경로, 테스트 스위트, Monte Carlo 평가가 준비되어 있어 “모델 성능 주장”을 반복 가능하게 만들 수 있습니다.
+3. **Built-in validation-friendly experiment system**  
+   CLI entrypoints, test suites, and Monte Carlo evaluation make model-performance claims repeatable.
 
-4. **CPU-only 환경에서도 프로토타이핑 가능**  
-   의존성/설계가 경량 실험을 지원하여, 초기 도입 단계에서 인프라 부담을 낮출 수 있습니다.
+4. **Prototype-friendly even in CPU-only environments**  
+   Dependency and design choices support lightweight experiments, lowering infrastructure overhead during early adoption.
 
 ---
 
