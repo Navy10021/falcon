@@ -2,14 +2,14 @@
 
 *Ontology-driven combat simulation and decision-support research stack combining simulation, GNN uncertainty modeling, RL training, HITL controls, and evaluation tooling.*
 
-## Badge suggestions
 
-```md
-[![CI](https://github.com/Navy10021/falcon/actions/workflows/ci.yml/badge.svg)](https://github.com/Navy10021/falcon/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Code Style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-```
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org)
+[![License](https://img.shields.io/badge/License-MIT-22C55E?style=flat-square)](LICENSE)
+[![LOC](https://img.shields.io/badge/코드-26%2C500+_줄-8B5CF6?style=flat-square)](.)
+[![UnitTypes](https://img.shields.io/badge/UnitType-42종-F59E0B?style=flat-square)](ontology/combat_schema.py)
+[![Scenarios](https://img.shields.io/badge/시나리오-5종_프리셋-3B82F6?style=flat-square)](ontology/scenario_presets.py)
+[![CI](https://img.shields.io/badge/CI-GitHub_Actions-16A34A?style=flat-square)](https://github.com)
 
 ## 🚀 TL;DR / Executive Summary
 
