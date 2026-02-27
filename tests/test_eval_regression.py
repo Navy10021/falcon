@@ -43,3 +43,25 @@ def test_eval_small_suite_generates_leaderboard(tmp_path):
     assert payload["suite"] == "small"
     assert payload["seed"] == 0
     assert payload["mc"] == 10
+
+
+def test_eval_accepts_output_dir_alias(tmp_path):
+    out_dir = tmp_path / "eval_alias"
+    cmd = [
+        sys.executable,
+        "-m",
+        "demo.evaluate",
+        "--suite",
+        "small",
+        "--seed",
+        "42",
+        "--mc",
+        "5",
+        "--output-dir",
+        str(out_dir),
+    ]
+    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    assert (out_dir / "leaderboard.csv").exists()
+    assert (out_dir / "metrics_aggregate.json").exists()
