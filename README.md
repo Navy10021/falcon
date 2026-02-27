@@ -35,7 +35,7 @@ This repository is designed for research and prototyping workflows such as:
 - 🧠 **Knowledge-structured combat modeling** via ontology modules.
 - 🌫️ **Uncertainty-aware inference** via Bayesian GNN components.
 - ⚔️ **Adversarial RL suite** including self-play and robust optimization variants.
-- 👨‍✈️ **Commander-centered decision support** through HITL preference/constraint modules.
+- 🪖 **Commander-centered decision support** through HITL preference/constraint modules.
 - 📊 **Evaluation stack** for scenario suites, Monte Carlo robustness, and metrics reporting.
 - 🧾 **Reproducibility-focused demo pipeline** that generates artifacts and reports.
 
