@@ -9,6 +9,7 @@ Phase 1+2: Blue (아군) PPO 에이전트
 
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -517,6 +518,7 @@ class BlueAgent:
         return metrics
 
     def save(self, path: str):
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         torch.save({
             "network": self.network.state_dict(),
             "optimizer": self.optimizer.state_dict(),

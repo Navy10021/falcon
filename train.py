@@ -365,9 +365,9 @@ def train_phase1(args):
             recent_wr = np.mean(win_rate_history[-50:]) if len(win_rate_history) >= 50 else np.mean(win_rate_history)
             recent_r  = np.mean(rewards_history[-50:])  if len(rewards_history) >= 50  else np.mean(rewards_history)
             gnn_l = np.mean(gnn_losses[-20:]) if gnn_losses else 0
-            logger.info("EP %5d/%d | Fog=%-8s | WR=%.1%% | R=%.2f | GNN Loss=%.4f",
+            logger.info("EP %5d/%d | Fog=%-8s | WR=%.1f%% | R=%.2f | GNN Loss=%.4f",
                         ep, args.episodes, fog_level.name,
-                        recent_wr, recent_r, gnn_l)
+                        recent_wr * 100, recent_r, gnn_l)
 
         # 체크포인트
         if ep > 0 and ep % args.save_interval == 0:
@@ -763,7 +763,11 @@ def _safe_git_sha() -> str:
     import subprocess
 
     try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
     except Exception:
         return "unknown"
 
