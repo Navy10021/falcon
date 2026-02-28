@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🦅 FALCON : **F**orce-**A**daptive **L**earning for **C**ombat **O**ptimization **N**etwork
+# 🦅 FALCON : Force-multiplying Adaptive Learning & Cognitive Operation Network
 
-### *다영역 온톨로지 기반 Bayesian GNN + 적대적 강화학습 + Human-in-the-Loop 전투 의사결정 지원*
+### *다영역 온톨로지 기반 Bayesian GNN + 적대적 강화학습 + Human-in-the-Loop 전투 의사결정 지원 플랫폼*
 
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org)
