@@ -12,7 +12,7 @@
 [![Scenarios](https://img.shields.io/badge/시나리오-5종_프리셋-3B82F6?style=flat-square)](ontology/scenario_presets.py)
 [![CI](https://img.shields.io/badge/CI-GitHub_Actions-16A34A?style=flat-square)](https://github.com)
 
-*"동일한 전투 효과를 유지하면서 최소한의 병력으로 임무를 달성하는 AI 의사결정 프레임워크"*
+*“병력을 늘리지 않는다. 대신 전장의 확률을 재설계한다.”*
 
 </div>
 
