@@ -12,7 +12,7 @@
 [![UnitTypes](https://img.shields.io/badge/UnitType-42-F59E0B?style=flat-square)](ontology/combat_schema.py)
 [![CI](https://img.shields.io/badge/CI-GitHub_Actions-16A34A?style=flat-square)](https://github.com)
 
-*“We do not increase the number of troops. Instead, we redesign the probabilities of the battlefield.”*
+#### Core Values : *“We do not increase the number of troops. Instead, we redesign the probabilities of the battlefield.”*
 
 </div>
 
