@@ -1,3 +1,5 @@
+<div align="center">
+  
 # 🦅 FALCON : Force-multiplying Adaptive Learning & Cognitive Operation Network
 
 *Ontology-driven combat simulation and decision-support research stack combining simulation, GNN uncertainty modeling, RL training, HITL controls, and evaluation tooling.*
@@ -9,6 +11,10 @@
 [![LOC](https://img.shields.io/badge/LOC-26%2C500+-8B5CF6?style=flat-square)](.)
 [![UnitTypes](https://img.shields.io/badge/UnitType-42-F59E0B?style=flat-square)](ontology/combat_schema.py)
 [![CI](https://img.shields.io/badge/CI-GitHub_Actions-16A34A?style=flat-square)](https://github.com)
+
+*“We do not increase the number of troops. Instead, we redesign the probabilities of the battlefield.”*
+
+</div>
 
 ## 🚀 TL;DR / Executive Summary
 
