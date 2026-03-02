@@ -16,7 +16,7 @@
 
 </div>
 
-## 🚀 TL;DR / Executive Summary
+## 📒 TL;DR / Executive Summary
 
 FALCON is an end-to-end experimentation repository for military-domain AI research workflows:
 
@@ -162,7 +162,7 @@ pip install -r requirements-dev.txt
 
 ---
 
-### Root demo (Fastest Way to Run)
+### 🚀Root demo (Fastest Way to Run)
 
 ```bash
 python demo.py --seed 42
