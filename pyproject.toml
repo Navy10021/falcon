@@ -24,6 +24,7 @@ minversion = "7.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+pythonpath = ["."]
 addopts = "-q"
 markers = [
   "slow: marks tests as slow (skip with -m 'not slow')",

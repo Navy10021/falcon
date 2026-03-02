@@ -1,6 +1,4 @@
 """tests/test_phase3_medium.py — Phase 3 중기 구현 검증 (B+I+K)"""
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 
 results = []

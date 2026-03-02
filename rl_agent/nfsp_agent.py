@@ -286,7 +286,7 @@ class NFSPAgent:
         }, path)
 
     def load(self, path: str):
-        ckpt = torch.load(path, map_location=self.device)
+        ckpt = torch.load(path, map_location=self.device, weights_only=True)
         self.br_network.load_state_dict(ckpt["br_network"])
         self.as_network.load_state_dict(ckpt["as_network"])
         self.br_optimizer.load_state_dict(ckpt["br_optimizer"])
