@@ -1,6 +1,4 @@
 """tests/test_tier2.py — TIER 2 통합 검증 (⑤~⑧)"""
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 
 results = []

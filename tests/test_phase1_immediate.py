@@ -1,6 +1,5 @@
 """tests/test_phase1_immediate.py — Phase 1 즉시 구현 검증 (G+H)"""
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import os
 import numpy as np
 
 results = []

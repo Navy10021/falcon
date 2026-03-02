@@ -124,7 +124,7 @@ class SelfPlayTrainer:
                 node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=10
             )
             self.gnn.load_state_dict(
-                torch.load(self.config.gnn_checkpoint_path, map_location="cpu")
+                torch.load(self.config.gnn_checkpoint_path, map_location="cpu", weights_only=True)
             )
             self.gnn.eval()
 

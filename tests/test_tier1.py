@@ -7,9 +7,6 @@ TIER 1 통합 검증 테스트
 ③ Temperature Scaling
 ④ MC Pareto 검증
 """
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 import numpy as np
 
 PASS = "✅ PASS"

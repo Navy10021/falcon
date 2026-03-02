@@ -1,6 +1,4 @@
 """tests/test_phase2_short.py — Phase 2 단기 구현 검증 (A+C)"""
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 
 results = []

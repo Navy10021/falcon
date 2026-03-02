@@ -248,7 +248,7 @@ class RedAgent:
         }, path)
 
     def load(self, path: str):
-        ckpt = torch.load(path, map_location=self.device)
+        ckpt = torch.load(path, map_location=self.device, weights_only=True)
         self.network.load_state_dict(ckpt["network"])
         self.optimizer.load_state_dict(ckpt["optimizer"])
         self.total_steps = ckpt.get("total_steps", 0)

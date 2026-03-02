@@ -26,9 +26,14 @@ def _build_mc_action_pairs(kg, blue_action: int) -> Optional[list]:
     train.py._build_blue_action_pairs()와 동일한 로직 — 평가-학습 환경 일관성 확보.
     """
     from ontology.combat_schema import ForceAlignment, UnitStatus
+    from rl_agent.blue_agent import BlueActionSpace
 
-    # BlueActionSpace 상수 (blue_agent.py 와 동기화)
-    ADVANCE = 1; FLANK = 5; REINFORCE = 0; SUPPORT = 4; WITHDRAW = 2
+    # BlueActionSpace 상수 — import 기반 동기화 (하드코딩 제거)
+    ADVANCE = BlueActionSpace.ADVANCE
+    FLANK = BlueActionSpace.FLANK
+    REINFORCE = BlueActionSpace.REINFORCE
+    SUPPORT = BlueActionSpace.SUPPORT
+    WITHDRAW = BlueActionSpace.WITHDRAW
 
     blue_units = [u for u in kg.units.values()
                   if u.alignment == ForceAlignment.BLUE
