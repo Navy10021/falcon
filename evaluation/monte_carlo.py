@@ -34,6 +34,7 @@ def _build_mc_action_pairs(kg, blue_action: int) -> Optional[list]:
     REINFORCE = BlueActionSpace.REINFORCE
     SUPPORT = BlueActionSpace.SUPPORT
     WITHDRAW = BlueActionSpace.WITHDRAW
+    REALLOCATE = BlueActionSpace.REALLOCATE
 
     blue_units = [u for u in kg.units.values()
                   if u.alignment == ForceAlignment.BLUE
@@ -56,6 +57,7 @@ def _build_mc_action_pairs(kg, blue_action: int) -> Optional[list]:
     mode_map = {
         ADVANCE: "weakest", FLANK: "weakest",
         REINFORCE: "strongest", SUPPORT: "strongest",
+        REALLOCATE: "balanced", WITHDRAW: "balanced",
     }
     mode = mode_map.get(int(blue_action), "balanced")
     targets = pick_targets(red_units, mode)

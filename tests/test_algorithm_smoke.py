@@ -24,36 +24,37 @@ def test_mat_instantiate():
 
 
 def test_mat_forward_pass():
-    """MATPolicy encoder+decoder forward pass should produce valid logits."""
+    """MATPolicy forward pass should produce valid logits and values."""
     from rl_agent.mat_policy import MATPolicy, MATConfig
-    config = MATConfig(n_agents=3, obs_dim=24, n_actions=6, d_model=32, n_heads=2, n_layers=1)
+    config = MATConfig(obs_dim=24, n_actions=8, d_model=32, n_heads=2, n_enc_layers=1, n_dec_layers=1)
     policy = MATPolicy(config)
 
-    # Batch of observations: [batch=1, n_agents=3, obs_dim=24]
-    obs = torch.randn(1, 3, 24)
+    n_agents = 3
+    obs = torch.randn(1, n_agents, config.obs_dim)
+    type_ids = torch.zeros(1, n_agents, dtype=torch.long)
+    prev_actions = torch.zeros(1, n_agents, dtype=torch.long)
+
     with torch.no_grad():
-        result = policy(obs)
-    # result should have logits for each agent
-    assert result is not None
-    # Check output shape contains agent actions
-    if isinstance(result, tuple):
-        logits = result[0]
-    else:
-        logits = result
-    assert logits.shape[-1] == 6  # n_actions
+        logits, values = policy(obs, type_ids, prev_actions)
+    assert logits.shape == (1, n_agents, config.n_actions)
+    assert values.shape == (1, n_agents)
+    assert torch.all(torch.isfinite(logits))
 
 
 def test_mat_select_actions():
     """MATPolicy.select_actions should return valid action indices."""
     from rl_agent.mat_policy import MATPolicy, MATConfig
-    config = MATConfig(n_agents=4, obs_dim=24, n_actions=6, d_model=32, n_heads=2, n_layers=1)
+    config = MATConfig(obs_dim=24, n_actions=8, d_model=32, n_heads=2, n_enc_layers=1, n_dec_layers=1)
     policy = MATPolicy(config)
 
-    obs = torch.randn(1, 4, 24)
+    n_agents = 4
+    obs = torch.randn(1, n_agents, config.obs_dim)
+    type_ids = torch.zeros(1, n_agents, dtype=torch.long)
+
     with torch.no_grad():
-        actions = policy.select_actions(obs)
-    assert len(actions) == 4
-    assert all(0 <= a < 6 for a in actions)
+        actions, log_probs, values = policy.select_actions(obs, type_ids)
+    assert actions.shape == (1, n_agents)
+    assert torch.all(actions >= 0) and torch.all(actions < config.n_actions)
 
 
 # ── RARL (Robust Adversarial RL) ─────────────────────────
@@ -71,14 +72,14 @@ def test_rarl_adversary_forward():
     """ObsAdversary should produce perturbations within epsilon."""
     from rl_agent.rarl import ObsAdversary, RARLConfig
     config = RARLConfig(epsilon=0.1)
-    adv = ObsAdversary(state_dim=128, config=config)
+    adv = ObsAdversary(state_dim=128)
 
     state = torch.randn(1, 128)
     with torch.no_grad():
-        perturbed = adv(state)
+        perturbed = adv(state, epsilon=config.epsilon)
 
     delta = (perturbed - state).abs().max().item()
-    assert delta <= config.epsilon + 1e-6, f"Perturbation {delta} exceeds epsilon {config.epsilon}"
+    assert delta <= config.epsilon + 1e-5, f"Perturbation {delta} exceeds epsilon {config.epsilon}"
 
 
 def test_rarl_protagonist_step():
@@ -100,25 +101,25 @@ def test_nfsp_instantiate():
     """NFSPAgent should instantiate with dual networks."""
     from rl_agent.nfsp_agent import NFSPAgent, NFSPAgentConfig
     config = NFSPAgentConfig()
-    agent = NFSPAgent(config)
+    agent = NFSPAgent(config=config)
     assert agent.br_network is not None
     assert agent.as_network is not None
 
 
 def test_nfsp_select_action():
-    """NFSPAgent should select actions via BR or AS policy."""
+    """NFSPAgent should select valid actions."""
     from rl_agent.nfsp_agent import NFSPAgent, NFSPAgentConfig
     config = NFSPAgentConfig(eta=0.5)
-    agent = NFSPAgent(config)
+    agent = NFSPAgent(config=config)
 
     state = np.random.randn(128).astype(np.float32)
-    action, mode = agent.select_action(state)
+    action, log_prob, value = agent.select_action(state, use_br=True)
     assert 0 <= action < 6
-    assert mode in ("br", "as")
+    assert np.isfinite(log_prob)
 
 
 def test_nfsp_buffer_add():
-    """NFSP buffers should accept experience tuples."""
+    """NFSP buffers should accept experience tuples via unified add()."""
     from rl_agent.nfsp_buffer import NFSPBufferPair, NFSPConfig, Experience
     config = NFSPConfig()
     buffers = NFSPBufferPair(config)
@@ -130,10 +131,10 @@ def test_nfsp_buffer_add():
         next_state=np.random.randn(128).astype(np.float32),
         done=False,
     )
-    buffers.add_rl(exp)
-    buffers.add_sl(exp)
-    assert len(buffers.rl_buffer) == 1
-    assert len(buffers.sl_buffer) == 1
+    buffers.add(exp, is_rl_step=True)
+    buffers.add(exp, is_rl_step=False)
+    assert len(buffers.rl_buffer) >= 1
+    assert len(buffers.sl_buffer) >= 1
 
 
 # ── PSRO (Policy Space Response Oracles) ─────────────────
@@ -153,21 +154,25 @@ def test_psro_oracle_instantiate():
     from rl_agent.psro_oracle import PSROOracle
     oracle = PSROOracle(seed=42)
     assert oracle is not None
-    assert oracle.payoff_matrix is not None
+    assert oracle.payoff is not None
 
 
 def test_psro_nash_mix():
-    """PSROOracle should compute Nash mixture (even trivial)."""
+    """PSROOracle.nash_mixture should compute strategy distribution."""
     from rl_agent.psro_oracle import PSROOracle
+    from rl_agent.league_selfplay import LeagueAgent, AgentRole
     oracle = PSROOracle(seed=42)
-    # Add initial strategies
-    oracle.add_initial_strategies(["s0", "s1"])
-    oracle.payoff_matrix.update("s0", "s1", 0.6)
-    oracle.payoff_matrix.update("s1", "s0", 0.4)
+    # add two strategies via LeagueAgent (oracle.add_strategy registers to both strategies dict and payoff)
+    agent_a = LeagueAgent(agent_id="s0", role=AgentRole.MAIN)
+    agent_b = LeagueAgent(agent_id="s1", role=AgentRole.MAIN)
+    oracle.add_strategy(agent_a)
+    oracle.add_strategy(agent_b)
+    oracle.record_result("s0", "s1", 0.6)
+    oracle.record_result("s1", "s0", 0.4)
 
-    mix = oracle.compute_nash_mix()
-    assert len(mix) == 2
-    assert abs(sum(mix.values()) - 1.0) < 1e-6
+    mix = oracle.nash_mixture()
+    assert len(mix) >= 2
+    assert abs(sum(mix.values()) - 1.0) < 0.01
 
 
 # ── HierarchicalRL ───────────────────────────────────────

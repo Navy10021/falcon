@@ -1,0 +1,20 @@
+# FALCON Simulator Composer 설정
+# SimulatorComposer.from_yaml()에서 로드
+
+engines:
+  # 전투 엔진: lanchester | mixed_lanchester | combat_dynamics
+  combat: "lanchester"
+
+  # 이동 엔진: maneuver | null (비활성)
+  movement: "maneuver"
+
+  # 효과 엔진 (복수 선택 가능): fog_of_war, weather, cyber
+  effects:
+    - "fog_of_war"
+    - "weather"
+
+  # 자원 관리 엔진: resource_manager | null (비활성)
+  resources: null
+
+  # Fog of War 수준: CLEAR | LIGHT | MODERATE | HEAVY | EXTREME
+  fog_level: "MODERATE"

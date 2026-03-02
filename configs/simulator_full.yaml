@@ -1,0 +1,12 @@
+# FALCON Simulator Composer — 전체 엔진 활성화 설정
+# 합동 작전 훈련용 (공-해-지-사이버 도메인 통합)
+
+engines:
+  combat: "lanchester"
+  movement: "maneuver"
+  effects:
+    - "fog_of_war"
+    - "weather"
+    - "cyber"
+  resources: "resource_manager"
+  fog_level: "HEAVY"
