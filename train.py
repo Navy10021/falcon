@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from utils.reproducibility import set_global_seed
 from utils.config_loader import load_config
+from utils.experiment_tracker import ExperimentTracker
 
 # 모듈 레벨 logger (main()에서 설정)
 logger = logging.getLogger("falcon")
@@ -358,7 +359,24 @@ def train_phase1(args):
             gnn.eval()
 
         rewards_history.append(episode_reward)
-        win_rate_history.append(1 if step_result is not None and 'blue_win' in str(step_result.mission_status) else 0)
+        win = 1 if step_result is not None and 'blue_win' in str(step_result.mission_status) else 0
+        win_rate_history.append(win)
+
+        # ExperimentTracker — 에피소드 메트릭 기록
+        tracker = getattr(args, "tracker", None)
+        if tracker is not None:
+            ep_metrics = {
+                "episode_reward": float(episode_reward),
+                "win": int(win),
+                "win_rate": float(np.mean(win_rate_history[-50:]) if len(win_rate_history) >= 50 else np.mean(win_rate_history)),
+                "gnn_loss": float(gnn_losses[-1]) if gnn_losses else 0.0,
+                "fog_level": float(fog_level.value) if hasattr(fog_level, 'value') else 0.0,
+            }
+            if ppo_metrics:
+                for k, v in ppo_metrics.items():
+                    if isinstance(v, (int, float)):
+                        ep_metrics[f"ppo_{k}"] = float(v)
+            tracker.log_episode(ep, ep_metrics, phase="phase1")
 
         # 로깅
         if ep % args.log_interval == 0 and ep > 0:
@@ -416,7 +434,7 @@ def train_phase2(args):
         else:
             logger.info("  %s: %s", k, v)
 
-    return {
+    phase2_metrics = {
         "episodes": int(final_stats.get("total_episodes", args.episodes)),
         "win_rate": float(final_stats.get("blue_win_rate", 0.0)),
         "mission_time": float(final_stats.get("avg_steps", 0.0)),
@@ -424,6 +442,17 @@ def train_phase2(args):
         "force_reduction": float(final_stats.get("avg_force_reduction", 0.0)),
         "stability": float(final_stats.get("pfsp_diversity", 0.0)),
     }
+
+    # ExperimentTracker — Phase 2 평가 메트릭 기록
+    tracker = getattr(args, "tracker", None)
+    if tracker is not None:
+        tracker.log_evaluation(
+            step=phase2_metrics["episodes"],
+            report={f"phase2/{k}": v for k, v in phase2_metrics.items() if isinstance(v, (int, float))},
+            phase="phase2",
+        )
+
+    return phase2_metrics
 
 
 def train_phase3(args):
@@ -974,6 +1003,8 @@ def main():
                         help="Phase 2 알고리즘 선택 (ppo|mappo)")
     parser.add_argument("--compare-algorithms", action="store_true",
                         help="Phase 2에서 동일 seed 기준 PPO vs MAPPO 비교 리포트 생성")
+    parser.add_argument("--simulator-config", type=str, default=None,
+                        help="SimulatorComposer YAML 설정 파일 경로 (예: configs/simulator.yaml)")
 
     args = parser.parse_args()
 
@@ -1009,32 +1040,71 @@ def main():
 
     set_global_seed(args.seed)
 
-    if args.phase == 1:
-        train_phase1(args)
-    elif args.phase == 2:
-        if args.compare_algorithms:
-            ppo_metrics = train_phase2(args)
-            _write_phase2_reports(args, "ppo", ppo_metrics)
+    # ExperimentTracker — TensorBoard + JSONL 이중 로깅 + 이상 탐지
+    tracker = ExperimentTracker(
+        log_dir=os.path.join(args.checkpoint_dir, "experiments"),
+        run_id=run_id,
+    )
+    tracker.log_hyperparams({
+        "phase": args.phase,
+        "algorithm": getattr(args, "algorithm", "ppo"),
+        "episodes": args.episodes,
+        "lr": getattr(args, "lr", None),
+        "seed": args.seed,
+        "mc_samples": getattr(args, "mc_samples", None),
+        "ppo_epochs": getattr(args, "ppo_epochs", None),
+    })
+    args.tracker = tracker
+    logger.info("ExperimentTracker initialized: %s", tracker.metrics_path)
 
-            mappo_args = copy.copy(args)
-            mappo_args.algorithm = "mappo"
-            mappo_metrics = train_phase2_mappo(mappo_args)
-            _write_phase2_reports(args, "mappo", mappo_metrics)
-            _write_phase2_comparison_report(args, ppo_metrics, mappo_metrics)
-        elif args.algorithm == "mappo":
-            mappo_metrics = train_phase2_mappo(args)
-            _write_phase2_reports(args, "mappo", mappo_metrics)
+    # SimulatorComposer — YAML 설정 기반 엔진 조합
+    from simulator.composer import SimulatorComposer
+    if args.simulator_config:
+        composer = SimulatorComposer.from_yaml(args.simulator_config, seed=args.seed)
+        logger.info("SimulatorComposer loaded from %s: %s",
+                     args.simulator_config, composer.active_engine_names)
+    else:
+        composer = SimulatorComposer.default(seed=args.seed)
+        logger.info("SimulatorComposer default: %s", composer.active_engine_names)
+    args.composer = composer
+
+    try:
+        if args.phase == 1:
+            train_phase1(args)
+        elif args.phase == 2:
+            if args.compare_algorithms:
+                ppo_metrics = train_phase2(args)
+                _write_phase2_reports(args, "ppo", ppo_metrics)
+
+                mappo_args = copy.copy(args)
+                mappo_args.algorithm = "mappo"
+                mappo_args.tracker = tracker
+                mappo_metrics = train_phase2_mappo(mappo_args)
+                _write_phase2_reports(args, "mappo", mappo_metrics)
+                _write_phase2_comparison_report(args, ppo_metrics, mappo_metrics)
+            elif args.algorithm == "mappo":
+                mappo_metrics = train_phase2_mappo(args)
+                _write_phase2_reports(args, "mappo", mappo_metrics)
+            else:
+                ppo_metrics = train_phase2(args)
+                _write_phase2_reports(args, "ppo", ppo_metrics)
+        elif args.phase == 3:
+            if not args.hitl:
+                logger.warning("Phase 3는 --hitl 옵션과 함께 실행하는 것을 권장합니다.")
+            train_phase3(args)
+        elif args.phase == 4:
+            if not args.preference_model:
+                logger.warning("--preference-model 미지정 → 균등 선호도로 재학습합니다.")
+            train_phase4(args)
+
+        # 이상 탐지 요약
+        anomalies = tracker.check_anomalies()
+        if anomalies:
+            logger.warning("[ANOMALY SUMMARY] %d anomaly events detected during training", len(anomalies))
         else:
-            ppo_metrics = train_phase2(args)
-            _write_phase2_reports(args, "ppo", ppo_metrics)
-    elif args.phase == 3:
-        if not args.hitl:
-            logger.warning("Phase 3는 --hitl 옵션과 함께 실행하는 것을 권장합니다.")
-        train_phase3(args)
-    elif args.phase == 4:
-        if not args.preference_model:
-            logger.warning("--preference-model 미지정 → 균등 선호도로 재학습합니다.")
-        train_phase4(args)
+            logger.info("[ANOMALY SUMMARY] No anomalies detected")
+    finally:
+        tracker.close()
 
 
 if __name__ == "__main__":
