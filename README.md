@@ -150,29 +150,39 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
-## 🛠️ Quick start
+## 🛠️ Quick Start
 
-### Root demo
+> 🔰 **New to FALCON?**  
+> For a structured, step-by-step walkthrough of the full pipeline,  
+> start with 👉 `notebook/FALCON.ipynb`.
+>
+> The notebook demonstrates the complete end-to-end workflow —  
+> from data generation and phased training to evaluation —  
+> with explanations and visualizations.
+
+---
+
+### Root demo (Fastest Way to Run)
 
 ```bash
 python demo.py --seed 42
 ```
 
-### Package-style demo pipeline
+### 📦Package-style demo pipeline
 
 ```bash
 python -m demo.demo --scenario urban_defense --seed 42 --policy rule --out runs/demo_urban
 ```
 
-### Fast evaluation
-
+### ⚡Fast evaluation
+If you just want to quickly validate model behavior:
 ```bash
 python evaluate.py --fast
 python -m demo.evaluate --suite small --mc 20 --seed 42 --out outputs/eval_small
 ```
 
 ## ✅ End-to-end workflow
-
+📌 After reviewing the notebook, you can reproduce the full experimental pipeline via CLI:
 ```bash
 # 1) Generate data artifacts
 python generate_data.py --quick
@@ -189,7 +199,7 @@ python evaluate.py --monte-carlo 200 --fog-level moderate --output-json runs/eva
 python -m demo.evaluate --suite standard --mc 100 --seed 0 --out outputs/eval_standard
 ```
 
-## Configuration
+## ⚙️Configuration
 
 - Core defaults: `configs/default.yaml`
 - Phase defaults: `configs/phase1.yaml`, `configs/phase2.yaml`, `configs/phase3.yaml`
