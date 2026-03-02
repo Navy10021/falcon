@@ -74,25 +74,28 @@ class NFSPAgent:
 
     def __init__(
         self,
-        n_actions: int = 6,
+        n_actions: int | NFSPAgentConfig = 6,
         state_dim: int = 128,
         config: Optional[NFSPAgentConfig] = None,
         device: str = "cpu",
     ):
-        self.n_actions = n_actions
+        if isinstance(n_actions, NFSPAgentConfig) and config is None:
+            config = n_actions
+            n_actions = 6
+        self.n_actions = int(n_actions)
         self.state_dim = state_dim
         self.config = config or NFSPAgentConfig()
         self.device = torch.device(device)
 
         # BR 네트워크 (PPO 업데이트)
-        self.br_network = ActorCritic(n_actions=n_actions).to(self.device)
+        self.br_network = ActorCritic(state_dim=state_dim, n_actions=self.n_actions).to(self.device)
         self.br_optimizer = optim.Adam(
             self.br_network.parameters(), lr=self.config.ppo.lr
         )
         self.br_buffer = RolloutBuffer()
 
         # AS 네트워크 (지도학습 업데이트)
-        self.as_network = ActorCritic(n_actions=n_actions).to(self.device)
+        self.as_network = ActorCritic(state_dim=state_dim, n_actions=self.n_actions).to(self.device)
         self.as_optimizer = optim.Adam(
             self.as_network.parameters(), lr=self.config.sl_lr
         )
@@ -120,9 +123,9 @@ class NFSPAgent:
     def select_action(
         self,
         state: np.ndarray,
-        use_br: bool = True,
+        use_br: Optional[bool] = None,
         deterministic: bool = False,
-    ) -> Tuple[int, float, float]:
+    ) -> Tuple[int, float, float] | Tuple[int, str]:
         """
         상태 → (action, log_prob, value)
 
@@ -132,9 +135,15 @@ class NFSPAgent:
             True → BR 네트워크 사용 (Best Response)
             False → AS 네트워크 사용 (Average Strategy)
         """
+        legacy_mode = use_br is None
+        if use_br is None:
+            use_br = self.should_use_br()
         network = self.br_network if use_br else self.as_network
         self._last_use_br = use_br
-        return network.get_action(state, deterministic)
+        action, log_prob, value = network.get_action(state, deterministic)
+        if legacy_mode:
+            return action, ("br" if use_br else "as")
+        return action, log_prob, value
 
     # ------------------------------------------------------------------
     # 경험 저장

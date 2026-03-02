@@ -368,6 +368,23 @@ class PSROOracle:
             print(f"  {rank:2d}. {sid:30s}  score={score:.4f}  ELO={elo:.0f}  WR={wr:.3f}")
         print(f"  총 전략 수: {self.payoff.n}  PSRO 반복: {self._iteration}")
 
+
+    @property
+    def payoff_matrix(self) -> PayoffMatrix:
+        """Legacy alias for payoff matrix."""
+        return self.payoff
+
+    def add_initial_strategies(self, strategy_ids: List[str]):
+        """Legacy helper to register strategy ids with default LeagueAgent metadata."""
+        for sid in strategy_ids:
+            if sid in self.strategies:
+                continue
+            self.add_strategy(LeagueAgent(agent_id=sid, role=AgentRole.MAIN))
+
+    def compute_nash_mix(self) -> Dict[str, float]:
+        """Legacy alias for nash_mixture."""
+        return self.nash_mixture()
+
     @property
     def n_strategies(self) -> int:
         return len(self.strategies)

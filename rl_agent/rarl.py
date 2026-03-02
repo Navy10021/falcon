@@ -124,8 +124,9 @@ class ObsAdversary(nn.Module):
     ε-ball 내 교란을 학습한다.
     """
 
-    def __init__(self, state_dim: int = STATE_DIM, hidden_dim: int = 128):
+    def __init__(self, state_dim: int = STATE_DIM, hidden_dim: int = 128, config: Optional[RARLConfig] = None):
         super().__init__()
+        self.config = config
         self.net = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
             nn.Tanh(),
@@ -135,9 +136,11 @@ class ObsAdversary(nn.Module):
             nn.Tanh(),  # 출력 ∈ [-1, 1]
         )
 
-    def forward(self, obs: torch.Tensor, epsilon: float = 0.05) -> torch.Tensor:
-        """교란 벡터 생성 (크기 ε 이내)"""
-        delta = self.net(obs) * epsilon
+    def forward(self, obs: torch.Tensor, epsilon: Optional[float] = None) -> torch.Tensor:
+        """교란 벡터 생성 (크기 ε 이내)."""
+        if epsilon is None:
+            epsilon = self.config.epsilon if self.config is not None else 0.05
+        delta = self.net(obs) * float(epsilon)
         return obs + delta  # 교란된 관측
 
     def perturb_np(self, obs: np.ndarray, epsilon: float = 0.05) -> np.ndarray:
