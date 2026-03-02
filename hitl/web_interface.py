@@ -8,6 +8,7 @@ HITL 웹 인터페이스 프로토타입 — REST API + HTML 대시보드
   2. 자연어로 제약 조건을 입력
   3. 전략을 선택하고 피드백을 제공
   4. 실시간 전투 상황을 모니터링
+  5. [R14] 제약 조건을 변경하여 Pareto 후보를 재생성
 
 할 수 있는 웹 인터페이스 프로토타입.
 
@@ -101,6 +102,30 @@ class BattleStatus:
 
 
 # ──────────────────────────────────────────────
+# Helper: ParetoGenerator StrategyOption → Web StrategyOption 변환
+# ──────────────────────────────────────────────
+
+def _pareto_opt_to_web(opt, index: int) -> StrategyOption:
+    """hitl.pareto_generator.StrategyOption → web StrategyOption 변환"""
+    cas = getattr(opt, "expected_casualties", 0)
+    risk = "low" if cas < 30 else "medium" if cas < 60 else "high"
+    strategy_type = opt.strategy_type
+    if hasattr(strategy_type, "value"):
+        strategy_type = strategy_type.value
+    return StrategyOption(
+        strategy_id=f"strategy_{index}",
+        strategy_type=str(strategy_type),
+        win_probability=getattr(opt, "win_probability", 0.5),
+        expected_casualties=float(cas),
+        expected_time=float(getattr(opt, "expected_time_steps", 30)),
+        force_required=int(getattr(opt, "force_size", 0)),
+        risk_level=getattr(opt, "risk_level", risk),
+        description=getattr(opt, "trade_offs", getattr(opt, "label", "")),
+        is_recommended=(index == 0),
+    )
+
+
+# ──────────────────────────────────────────────
 # HITL Session Manager
 # ──────────────────────────────────────────────
 
@@ -120,8 +145,10 @@ class HITLSession:
         self.strategy_options: List[StrategyOption] = []
         self.commander_inputs: List[CommanderInput] = []
         self.history: List[Dict] = []
+        self.active_constraints: Dict[str, Any] = {}
 
         self._initialized = False
+        self.kg = None
 
     def initialize(self, n_blue: int = 8, n_red: int = 6):
         """시나리오 초기화 및 Pareto 후보 생성"""
@@ -149,23 +176,74 @@ class HITLSession:
         constraints = CommanderConstraints()
         options = gen.generate(self.kg, constraints)
 
-        self.strategy_options = []
-        for i, opt in enumerate(options):
-            risk = "low" if opt.expected_casualties < 30 else "medium" if opt.expected_casualties < 60 else "high"
-            self.strategy_options.append(StrategyOption(
-                strategy_id=f"strategy_{i}",
-                strategy_type=opt.strategy_type,
-                win_probability=opt.win_probability,
-                expected_casualties=opt.expected_casualties,
-                expected_time=opt.expected_time,
-                force_required=opt.force_required,
-                risk_level=risk,
-                description=opt.description,
-                is_recommended=(i == 0),
-            ))
+        self.strategy_options = [
+            _pareto_opt_to_web(opt, i) for i, opt in enumerate(options)
+        ]
 
         self._initialized = True
         return self.get_state()
+
+    def update_constraints(self, constraints_dict: Dict[str, Any]) -> Dict:
+        """
+        R14: 지휘관 제약 조건 업데이트 → Pareto 후보 재생성.
+
+        Parameters
+        ----------
+        constraints_dict : dict
+            {
+                "max_force_size": int or None,
+                "min_win_probability": float (0-1),
+                "max_casualties": int or None,
+                "max_time_steps": int,
+                "prefer_flanking": bool,
+                "prefer_artillery": bool,
+                "avoid_urban": bool,
+            }
+        """
+        from hitl.pareto_generator import ParetoStrategyGenerator, CommanderConstraints
+
+        if self.kg is None:
+            return {"error": "Session not initialized. Call /api/session/init first."}
+
+        self.active_constraints = constraints_dict
+
+        # CommanderConstraints 구성
+        cc = CommanderConstraints(
+            max_force_size=constraints_dict.get("max_force_size"),
+            min_win_probability=constraints_dict.get("min_win_probability", 0.5),
+            max_casualties=constraints_dict.get("max_casualties"),
+            max_time_steps=constraints_dict.get("max_time_steps", 50),
+            prefer_flanking=constraints_dict.get("prefer_flanking", False),
+            prefer_artillery=constraints_dict.get("prefer_artillery", False),
+            avoid_urban=constraints_dict.get("avoid_urban", False),
+        )
+
+        gen = ParetoStrategyGenerator(n_candidates=5, mc_eval_runs=3)
+        options = gen.generate(self.kg, cc)
+
+        self.strategy_options = [
+            _pareto_opt_to_web(opt, i) for i, opt in enumerate(options)
+        ]
+
+        self.history.append({
+            "type": "constraint_update",
+            "constraints": constraints_dict,
+            "n_options": len(self.strategy_options),
+        })
+
+        cmd_input = CommanderInput(
+            command_text="[constraint_update]",
+            constraints=constraints_dict,
+        )
+        self.commander_inputs.append(cmd_input)
+
+        return {
+            "constraints_applied": constraints_dict,
+            "strategy_options": [s.to_dict() for s in self.strategy_options],
+            "n_options": len(self.strategy_options),
+            "all_violated": gen.last_generation_all_violated,
+            "note": gen.last_generation_note,
+        }
 
     def process_command(self, command_text: str) -> Dict:
         """자연어 명령 처리"""
@@ -224,6 +302,22 @@ class HITLSession:
             "message": f"'{selected.strategy_type}' 전략이 선택되었습니다.",
         }
 
+    def get_pareto_data(self) -> List[Dict]:
+        """R14: Pareto 시각화용 데이터 (scatter plot)"""
+        return [
+            {
+                "id": s.strategy_id,
+                "type": s.strategy_type,
+                "x": s.win_probability,  # x축: 승률
+                "y": s.expected_casualties,  # y축: 사상자
+                "size": s.force_required,  # 버블 크기: 병력
+                "time": s.expected_time,
+                "risk": s.risk_level,
+                "recommended": s.is_recommended,
+            }
+            for s in self.strategy_options
+        ]
+
     def get_state(self) -> Dict:
         """현재 세션 상태 반환"""
         return {
@@ -231,6 +325,8 @@ class HITLSession:
             "initialized": self._initialized,
             "battle_status": self.battle_status.to_dict(),
             "strategy_options": [s.to_dict() for s in self.strategy_options],
+            "pareto_data": self.get_pareto_data(),
+            "active_constraints": self.active_constraints,
             "n_commander_inputs": len(self.commander_inputs),
             "history_length": len(self.history),
         }
@@ -299,11 +395,28 @@ def create_falcon_app():
         result = session.select_strategy(strategy_id, feedback)
         return jsonify(result)
 
+    @app.route("/api/constraints/update", methods=["POST"])
+    def update_constraints():
+        """R14: 제약 조건 업데이트 → Pareto 후보 재생성"""
+        data = request.get_json() or {}
+        session_id = data.get("session_id", "default")
+        constraints = data.get("constraints", {})
+        session = get_or_create_session(session_id)
+        result = session.update_constraints(constraints)
+        return jsonify(result)
+
+    @app.route("/api/pareto/data")
+    def pareto_data():
+        """R14: Pareto 시각화 데이터"""
+        session_id = request.args.get("session_id", "default")
+        session = get_or_create_session(session_id)
+        return jsonify({"pareto": session.get_pareto_data()})
+
     return app
 
 
 # ──────────────────────────────────────────────
-# Dashboard HTML Template
+# Dashboard HTML Template (R14 Enhanced)
 # ──────────────────────────────────────────────
 
 _DASHBOARD_HTML = """<!DOCTYPE html>
@@ -314,35 +427,59 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', sans-serif; background: #0a0e17; color: #e0e0e0; }
-        .header { background: #111827; padding: 16px 24px; border-bottom: 2px solid #1e40af; }
+        .header { background: #111827; padding: 16px 24px; border-bottom: 2px solid #1e40af;
+                  display: flex; justify-content: space-between; align-items: center; }
         .header h1 { font-size: 22px; color: #60a5fa; }
+        .header .badge { background: #1e40af; padding: 4px 10px; border-radius: 12px;
+                        font-size: 11px; color: #93c5fd; }
         .container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; }
+        .full-width { grid-column: 1 / -1; }
         .panel { background: #111827; border: 1px solid #1e3a5f; border-radius: 8px; padding: 16px; }
         .panel h2 { color: #93c5fd; font-size: 16px; margin-bottom: 12px; }
         .strategy-card { background: #1e293b; border: 1px solid #334155; border-radius: 6px;
-                        padding: 12px; margin-bottom: 8px; cursor: pointer; }
-        .strategy-card:hover { border-color: #60a5fa; }
-        .strategy-card.recommended { border-color: #22c55e; }
+                        padding: 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s; }
+        .strategy-card:hover { border-color: #60a5fa; transform: translateX(4px); }
+        .strategy-card.recommended { border-color: #22c55e; border-width: 2px; }
+        .strategy-card.selected { border-color: #f59e0b; background: #1e293b; }
         .metric { display: inline-block; margin-right: 16px; }
         .metric-value { font-size: 20px; font-weight: bold; color: #60a5fa; }
         .metric-label { font-size: 11px; color: #9ca3af; }
-        input, textarea { background: #1e293b; border: 1px solid #334155; color: #e0e0e0;
-                         padding: 8px 12px; border-radius: 4px; width: 100%; }
+        input, textarea, select { background: #1e293b; border: 1px solid #334155; color: #e0e0e0;
+                         padding: 8px 12px; border-radius: 4px; width: 100%; margin-bottom: 8px; }
+        input[type="number"] { width: 120px; }
+        input[type="checkbox"] { width: auto; margin-right: 6px; }
         button { background: #1e40af; color: white; border: none; padding: 8px 16px;
-                border-radius: 4px; cursor: pointer; margin-top: 8px; }
+                border-radius: 4px; cursor: pointer; margin-top: 4px; margin-right: 8px; }
         button:hover { background: #2563eb; }
+        button.secondary { background: #374151; }
+        button.secondary:hover { background: #4b5563; }
         .alert-normal { color: #22c55e; }
         .alert-caution { color: #f59e0b; }
         .alert-critical { color: #ef4444; }
         #response { background: #0f172a; padding: 12px; border-radius: 4px;
-                   margin-top: 8px; min-height: 60px; font-size: 13px; }
+                   margin-top: 8px; min-height: 60px; font-size: 13px; white-space: pre-wrap; }
+        .constraint-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .constraint-row label { min-width: 140px; font-size: 13px; color: #9ca3af; }
+        .constraint-row input { margin-bottom: 0; }
+        #pareto-canvas { width: 100%; height: 280px; background: #0f172a; border-radius: 6px;
+                        border: 1px solid #1e3a5f; position: relative; }
+        .pareto-dot { position: absolute; border-radius: 50%; cursor: pointer;
+                     transition: transform 0.2s; opacity: 0.85; }
+        .pareto-dot:hover { transform: scale(1.4); opacity: 1; }
+        .pareto-dot.recommended { border: 2px solid #22c55e; }
+        .axis-label { position: absolute; font-size: 10px; color: #6b7280; }
+        .pareto-tooltip { position: absolute; background: #1e293b; border: 1px solid #334155;
+                         padding: 8px 10px; border-radius: 4px; font-size: 11px;
+                         pointer-events: none; display: none; z-index: 10; }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>FALCON HITL Command Interface</h1>
+        <span class="badge">R14 Pareto Selection</span>
     </div>
     <div class="container">
+        <!-- Left: Battle Status + Strategies -->
         <div class="panel">
             <h2>Battle Status</h2>
             <div id="status">
@@ -358,22 +495,69 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
             <h2 style="margin-top:16px">Strategy Options</h2>
             <div id="strategies"></div>
         </div>
+
+        <!-- Right: Constraints + Command -->
         <div class="panel">
-            <h2>Commander Input</h2>
-            <textarea id="command-input" rows="3"
+            <h2>Commander Constraints</h2>
+            <div class="constraint-row">
+                <label>Max Force Size:</label>
+                <input type="number" id="c-max-force" placeholder="(no limit)" min="10" step="10">
+            </div>
+            <div class="constraint-row">
+                <label>Min Win Probability:</label>
+                <input type="number" id="c-min-win" value="0.50" min="0" max="1" step="0.05">
+            </div>
+            <div class="constraint-row">
+                <label>Max Casualties:</label>
+                <input type="number" id="c-max-cas" placeholder="(no limit)" min="0" step="5">
+            </div>
+            <div class="constraint-row">
+                <label>Max Time Steps:</label>
+                <input type="number" id="c-max-time" value="50" min="10" step="5">
+            </div>
+            <div class="constraint-row">
+                <label>
+                    <input type="checkbox" id="c-flanking"> Prefer Flanking
+                </label>
+                <label>
+                    <input type="checkbox" id="c-artillery"> Prefer Artillery
+                </label>
+                <label>
+                    <input type="checkbox" id="c-no-urban"> Avoid Urban
+                </label>
+            </div>
+            <button onclick="applyConstraints()">Apply Constraints</button>
+            <button class="secondary" onclick="resetConstraints()">Reset</button>
+
+            <h2 style="margin-top:16px">Natural Language Command</h2>
+            <textarea id="command-input" rows="2"
                 placeholder="Enter command (e.g., 'Minimize casualties, win rate above 60%')"></textarea>
             <button onclick="sendCommand()">Send Command</button>
-            <button onclick="initSession()">New Scenario</button>
+            <button class="secondary" onclick="initSession()">New Scenario</button>
             <div id="response"></div>
+        </div>
+
+        <!-- Full-width: Pareto Scatter -->
+        <div class="panel full-width">
+            <h2>Pareto Front Visualization</h2>
+            <div id="pareto-canvas">
+                <span class="axis-label" style="bottom:4px;left:50%;">Win Probability &rarr;</span>
+                <span class="axis-label" style="top:50%;left:4px;transform:rotate(-90deg) translateX(-50%);
+                      transform-origin:left center;">Casualties &darr;</span>
+                <div class="pareto-tooltip" id="pareto-tooltip"></div>
+            </div>
         </div>
     </div>
     <script>
+        let currentData = null;
+
         async function initSession() {
             const res = await fetch('/api/session/init', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({session_id: 'default', n_blue: 8, n_red: 6})
             });
             const data = await res.json();
+            currentData = data;
             updateUI(data);
         }
         async function sendCommand() {
@@ -384,6 +568,43 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
             });
             const data = await res.json();
             document.getElementById('response').innerText = JSON.stringify(data, null, 2);
+        }
+        async function applyConstraints() {
+            const constraints = {};
+            const maxForce = document.getElementById('c-max-force').value;
+            if (maxForce) constraints.max_force_size = parseInt(maxForce);
+            const minWin = document.getElementById('c-min-win').value;
+            if (minWin) constraints.min_win_probability = parseFloat(minWin);
+            const maxCas = document.getElementById('c-max-cas').value;
+            if (maxCas) constraints.max_casualties = parseInt(maxCas);
+            const maxTime = document.getElementById('c-max-time').value;
+            if (maxTime) constraints.max_time_steps = parseInt(maxTime);
+            constraints.prefer_flanking = document.getElementById('c-flanking').checked;
+            constraints.prefer_artillery = document.getElementById('c-artillery').checked;
+            constraints.avoid_urban = document.getElementById('c-no-urban').checked;
+
+            const res = await fetch('/api/constraints/update', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({constraints: constraints})
+            });
+            const data = await res.json();
+            document.getElementById('response').innerText =
+                (data.note ? data.note + '\\n\\n' : '') + JSON.stringify(data, null, 2);
+            // Refresh state
+            const stateRes = await fetch('/api/session/state');
+            const stateData = await stateRes.json();
+            currentData = stateData;
+            updateUI(stateData);
+        }
+        function resetConstraints() {
+            document.getElementById('c-max-force').value = '';
+            document.getElementById('c-min-win').value = '0.50';
+            document.getElementById('c-max-cas').value = '';
+            document.getElementById('c-max-time').value = '50';
+            document.getElementById('c-flanking').checked = false;
+            document.getElementById('c-artillery').checked = false;
+            document.getElementById('c-no-urban').checked = false;
+            applyConstraints();
         }
         function updateUI(data) {
             if (data.battle_status) {
@@ -400,13 +621,68 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
                 container.innerHTML = data.strategy_options.map(s =>
                     `<div class="strategy-card ${s.is_recommended ? 'recommended' : ''}"
                           onclick="selectStrategy('${s.id}')">
-                        <strong>${s.type}</strong> | Win: ${(s.win_probability*100).toFixed(1)}%
-                        | Cas: ${s.expected_casualties.toFixed(0)}
-                        | Risk: ${s.risk_level}
+                        <strong>${s.type}</strong> |
+                        Win: ${(s.win_probability*100).toFixed(1)}% |
+                        Cas: ${s.expected_casualties.toFixed(0)} |
+                        Force: ${s.force_required} |
+                        Risk: ${s.risk_level}
                         ${s.is_recommended ? ' [Recommended]' : ''}
+                        <div style="font-size:11px;color:#9ca3af;margin-top:4px">${s.description}</div>
                     </div>`
                 ).join('');
             }
+            if (data.pareto_data) {
+                renderPareto(data.pareto_data);
+            }
+        }
+        function renderPareto(points) {
+            const canvas = document.getElementById('pareto-canvas');
+            // Clear old dots
+            canvas.querySelectorAll('.pareto-dot').forEach(d => d.remove());
+            if (!points || points.length === 0) return;
+
+            const W = canvas.offsetWidth - 60;
+            const H = canvas.offsetHeight - 40;
+            const pad = {left: 40, top: 10, right: 20, bottom: 30};
+
+            const xMin = Math.min(...points.map(p => p.x)) - 0.05;
+            const xMax = Math.max(...points.map(p => p.x)) + 0.05;
+            const yMin = 0;
+            const yMax = Math.max(...points.map(p => p.y)) * 1.2 + 1;
+
+            const colors = {low: '#22c55e', medium: '#f59e0b', high: '#ef4444'};
+
+            points.forEach(p => {
+                const px = pad.left + ((p.x - xMin) / (xMax - xMin)) * W;
+                const py = pad.top + (1 - (p.y - yMin) / (yMax - yMin)) * H;
+                const sz = Math.max(14, Math.min(36, p.size / 20));
+
+                const dot = document.createElement('div');
+                dot.className = 'pareto-dot' + (p.recommended ? ' recommended' : '');
+                dot.style.left = px + 'px';
+                dot.style.top = py + 'px';
+                dot.style.width = sz + 'px';
+                dot.style.height = sz + 'px';
+                dot.style.background = colors[p.risk] || '#60a5fa';
+                dot.style.marginLeft = (-sz/2) + 'px';
+                dot.style.marginTop = (-sz/2) + 'px';
+
+                dot.onmouseenter = (e) => {
+                    const tt = document.getElementById('pareto-tooltip');
+                    tt.style.display = 'block';
+                    tt.style.left = (px + 20) + 'px';
+                    tt.style.top = (py - 20) + 'px';
+                    tt.innerHTML = `<strong>${p.type}</strong><br>
+                        Win: ${(p.x*100).toFixed(1)}% | Cas: ${p.y.toFixed(0)}<br>
+                        Force: ${p.size} | Time: ${p.time} steps`;
+                };
+                dot.onmouseleave = () => {
+                    document.getElementById('pareto-tooltip').style.display = 'none';
+                };
+                dot.onclick = () => selectStrategy(p.id);
+
+                canvas.appendChild(dot);
+            });
         }
         async function selectStrategy(id) {
             const res = await fetch('/api/strategy/select', {
@@ -415,6 +691,8 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
             });
             const data = await res.json();
             document.getElementById('response').innerText = JSON.stringify(data, null, 2);
+            // Highlight selected card
+            document.querySelectorAll('.strategy-card').forEach(c => c.classList.remove('selected'));
         }
         initSession();
     </script>
