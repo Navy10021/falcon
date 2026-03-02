@@ -39,7 +39,7 @@ This repository is structured for **research-to-prototype iteration** rather tha
 | Evaluation outputs | JSON/CSV summaries, plots, AAR HTML (demo path) |
 | Reproducibility | Seeded CLI flows, pytest suite, GitHub Actions CI |
 
-## Why this repository matters
+## 🎯 Why this repository matters
 
 Many repositories focus on isolated algorithm performance. FALCON instead keeps **scenario modeling, simulation realism, agent training, decision constraints, and evaluation artifacts** in one codebase. That organization is useful for:
 
@@ -162,19 +162,19 @@ pip install -r requirements-dev.txt
 
 ---
 
-### 🚀Root demo (Fastest Way to Run)
+### 🚀 Root demo (Fastest Way to Run)
 
 ```bash
 python demo.py --seed 42
 ```
 
-### 📦Package-style demo pipeline
+### 📦 Package-style demo pipeline
 
 ```bash
 python -m demo.demo --scenario urban_defense --seed 42 --policy rule --out runs/demo_urban
 ```
 
-### ⚡Fast evaluation
+### ⚡ Fast evaluation
 If you just want to quickly validate model behavior:
 ```bash
 python evaluate.py --fast
@@ -287,7 +287,7 @@ CI is defined in `.github/workflows/ci.yml` and runs lint + tests on push/PR.
 - **Structure policy:** `docs/PROJECT_STRUCTURE.md`.
 - **Additional reports:** `docs/report/`, `docs/reports/`, `docs/proposal_assets/`.
 
-## Contributing
+## 🤝 Contributing
 
 Please follow `CONTRIBUTING.md` for contribution expectations, test discipline, and PR workflow.
 
@@ -299,7 +299,7 @@ Practical high-impact contribution areas:
 - test coverage and experiment reproducibility,
 - documentation cleanup and packaging consistency.
 
-## Roadmap
+## 🗺️ Roadmap
 
 ### Implemented baseline
 
@@ -314,6 +314,24 @@ Practical high-impact contribution areas:
 - Additional baseline comparators and standardized benchmark tables.
 - Continued refactoring of large training/evaluation files into smaller modules.
 
-## License
+## ⚖️ License
 
-MIT License. See `LICENSE`.
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
+---
+
+## 🛡️ Responsible Use Notice
+
+FALCON is developed as a research and simulation framework for
+AI-driven decision support and force optimization modeling.
+
+It is **NOT intended for operational deployment in real-world combat,
+offensive military action, or targeting of specific entities**.
+
+Any use of this repository should comply with:
+
+- International humanitarian law
+- AI ethics and safety standards
+- Responsible research and innovation principles
+
+The authors disclaim responsibility for misuse or unlawful application.
