@@ -999,12 +999,17 @@ def main():
     parser.add_argument("--save-interval", type=int, default=None, help="저장 간격")
     parser.add_argument("--checkpoint-dir", type=str, default=None, help="체크포인트 저장 경로")
     parser.add_argument("--hitl", action="store_true", help="Phase 3 HITL 통합 루프 활성화")
-    parser.add_argument("--algorithm", type=str, default="ppo", choices=["ppo", "mappo"],
-                        help="Phase 2 알고리즘 선택 (ppo|mappo)")
+    parser.add_argument("--algorithm", type=str, default="ppo",
+                        choices=["ppo", "mappo", "rarl", "nfsp"],
+                        help="알고리즘 선택 (ppo|mappo|rarl|nfsp)")
     parser.add_argument("--compare-algorithms", action="store_true",
                         help="Phase 2에서 동일 seed 기준 PPO vs MAPPO 비교 리포트 생성")
     parser.add_argument("--simulator-config", type=str, default=None,
                         help="SimulatorComposer YAML 설정 파일 경로 (예: configs/simulator.yaml)")
+    parser.add_argument("--multidomain", action="store_true",
+                        help="R11: 4×4 다도메인 배치 실험 실행")
+    parser.add_argument("--multidomain-seeds", type=int, nargs="+", default=None,
+                        help="R11: 다도메인 실험 시드 목록 (기본: 0 1 2 3 4)")
 
     args = parser.parse_args()
 
@@ -1026,8 +1031,10 @@ def main():
 
     setup_logger(args.checkpoint_dir, run_id)
 
-    if args.phase != 2 and args.algorithm != "ppo":
+    if args.algorithm in ("mappo",) and args.phase != 2:
         parser.error("--algorithm mappo 는 --phase 2에서만 사용할 수 있습니다.")
+    if args.algorithm in ("rarl", "nfsp") and args.phase not in (1, 2):
+        parser.error("--algorithm rarl|nfsp 는 --phase 1 또는 2에서 사용할 수 있습니다.")
 
     logger.info("AI Combat Optimization System v2.0")
     logger.info("run_id=%s | Phase=%d | Episodes=%d | Seed=%d",
@@ -1069,7 +1076,49 @@ def main():
     args.composer = composer
 
     try:
-        if args.phase == 1:
+        # R11: 다도메인 배치 실험
+        if getattr(args, "multidomain", False):
+            from utils.multidomain_runner import MultiDomainRunner, DomainExperimentConfig
+            md_seeds = getattr(args, "multidomain_seeds", None) or [0, 1, 2, 3, 4]
+            md_config = DomainExperimentConfig(seeds=md_seeds, eval_runs_per_seed=20)
+            md_runner = MultiDomainRunner(md_config)
+            md_report = md_runner.run_batch_experiment(
+                output_dir=os.path.join(args.checkpoint_dir, "multidomain"),
+            )
+            tracker.log_evaluation(step=0, report={
+                "md/in_domain_wr": md_report["summary"]["in_domain_win_rate_avg"],
+                "md/ood_wr": md_report["summary"]["ood_win_rate_avg"],
+                "md/gap": md_report["summary"]["generalization_gap"],
+            }, phase="multidomain")
+
+        # R12: Tier C 알고리즘 (RARL/NFSP)
+        elif args.algorithm in ("rarl", "nfsp"):
+            from rl_agent.tier_c_trainer import TierCTrainer, TierCConfig
+            tc_config = TierCConfig(
+                algorithm=args.algorithm,
+                episodes=args.episodes,
+                seed=args.seed,
+                lr=getattr(args, "lr", 3e-4),
+                log_interval=args.log_interval,
+                save_interval=args.save_interval,
+                checkpoint_dir=args.checkpoint_dir,
+            )
+            tc_trainer = TierCTrainer(tc_config)
+            tc_metrics = tc_trainer.train()
+            tracker.log_evaluation(
+                step=tc_metrics["episodes"],
+                report={f"tierc/{k}": v for k, v in tc_metrics.items()
+                        if isinstance(v, (int, float))},
+                phase=f"tierc_{args.algorithm}",
+            )
+            # 베이스라인 비교
+            comparison = tc_trainer.evaluate_vs_baseline(n_runs=30)
+            comp_path = os.path.join(args.checkpoint_dir, f"{args.algorithm}_vs_ppo.json")
+            TierCTrainer.save_comparison_report(comparison, comp_path)
+            logger.info("[R12] %s vs PPO: ΔWR=%+.1f%%",
+                        args.algorithm.upper(), comparison["delta_win_rate"] * 100)
+
+        elif args.phase == 1:
             train_phase1(args)
         elif args.phase == 2:
             if args.compare_algorithms:
