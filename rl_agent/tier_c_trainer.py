@@ -89,8 +89,14 @@ class TierCTrainer:
         else:
             raise ValueError(f"Unknown Tier C algorithm: {cfg.algorithm}")
 
-    def _select_action(self, state: np.ndarray) -> Tuple[int, float, float]:
+    def _select_action(
+        self,
+        state: np.ndarray,
+        use_br: Optional[bool] = None,
+    ) -> Tuple[int, float, float]:
         """알고리즘별 행동 선택 (통합 인터페이스)"""
+        if self.config.algorithm == "nfsp":
+            return self.agent.select_action(state, use_br=use_br)
         return self.agent.select_action(state)
 
     def _compute_reward(
@@ -195,7 +201,11 @@ class TierCTrainer:
                 state = build_state_vector(obs_kg, uncertainty_map=uncertainty_map)
                 avg_unc = float(np.mean(list(uncertainty_map.values()))) if uncertainty_map else 0.0
 
-                action, log_prob, value = self._select_action(state)
+                use_br = True
+                if cfg.algorithm == "nfsp":
+                    use_br = self.agent.should_use_br()
+
+                action, log_prob, value = self._select_action(state, use_br=use_br)
 
                 action_pairs = _build_blue_action_pairs(
                     kg, action, ForceAlignment, UnitStatus, BlueActionSpace,
@@ -215,10 +225,6 @@ class TierCTrainer:
                     next_state = build_state_vector(next_obs_kg)
                 else:
                     next_state = state  # terminal
-
-                use_br = True
-                if cfg.algorithm == "nfsp":
-                    use_br = self.agent.should_use_br()
 
                 self._store_transition(
                     state, action, reward, next_state, done, log_prob, value, use_br,
