@@ -16,6 +16,8 @@
 
 </div>
 
+---
+
 ## 📒 TL;DR / Executive Summary
 
 FALCON is an end-to-end experimentation repository for military-domain AI research workflows:
@@ -318,7 +320,6 @@ Practical high-impact contribution areas:
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
----
 
 ## 🛡️ Responsible Use Notice
 
