@@ -66,6 +66,16 @@ class MATConfig:
     gamma: float = 0.99
     gae_lambda: float = 0.95
     max_grad_norm: float = 0.5
+    # legacy aliases
+    n_agents: Optional[int] = None
+    n_layers: Optional[int] = None
+
+    def __post_init__(self):
+        if self.n_layers is not None:
+            self.n_enc_layers = int(self.n_layers)
+            self.n_dec_layers = int(self.n_layers)
+        if self.n_agents is not None:
+            self.max_agents = max(int(self.n_agents), int(self.max_agents))
 
 
 # ──────────────────────────────────────────────
@@ -204,10 +214,15 @@ class MATPolicy(nn.Module):
     def forward(
         self,
         obs: torch.Tensor,              # [B, N, obs_dim]
-        type_ids: torch.Tensor,         # [B, N]
-        prev_actions: torch.Tensor,     # [B, N]  (teacher-forcing)
+        type_ids: Optional[torch.Tensor] = None,         # [B, N]
+        prev_actions: Optional[torch.Tensor] = None,     # [B, N]  (teacher-forcing)
         pad_mask: Optional[torch.Tensor] = None,  # [B, N]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        bsz, n_agents = obs.shape[:2]
+        if type_ids is None:
+            type_ids = torch.full((bsz, n_agents), N_UNIT_TYPES, dtype=torch.long, device=obs.device)
+        if prev_actions is None:
+            prev_actions = torch.zeros((bsz, n_agents), dtype=torch.long, device=obs.device)
         memory = self.encoder(obs, type_ids, key_padding_mask=pad_mask)
         logits, values = self.decoder(memory, prev_actions, memory_key_padding_mask=pad_mask)
         return logits, values   # [B, N, n_actions], [B, N]
@@ -216,7 +231,7 @@ class MATPolicy(nn.Module):
     def select_actions(
         self,
         obs: torch.Tensor,          # [B, N, obs_dim]
-        type_ids: torch.Tensor,     # [B, N]
+        type_ids: Optional[torch.Tensor] = None,     # [B, N]
         action_masks: Optional[torch.Tensor] = None,  # [B, N, n_actions] bool (True=허용)
         pad_mask: Optional[torch.Tensor] = None,
         deterministic: bool = False,
@@ -231,6 +246,9 @@ class MATPolicy(nn.Module):
         values    [B, N]
         """
         B, N = obs.shape[:2]
+        legacy_call = type_ids is None
+        if type_ids is None:
+            type_ids = torch.full((B, N), N_UNIT_TYPES, dtype=torch.long, device=obs.device)
         memory = self.encoder(obs, type_ids, key_padding_mask=pad_mask)
 
         # auto-regressive 생성
@@ -267,6 +285,8 @@ class MATPolicy(nn.Module):
                 prev_actions = prev_actions.clone()
                 prev_actions[:, i + 1] = a_i + 1
 
+        if legacy_call:
+            return actions[0].detach().cpu().tolist()  # type: ignore[return-value]
         return actions, log_probs, values_all
 
 

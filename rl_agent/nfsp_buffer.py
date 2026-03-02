@@ -217,6 +217,17 @@ class NFSPBufferPair:
             self.sl_buffer.add(exp)
         self._step += 1
 
+
+    def add_rl(self, exp: Experience):
+        """Legacy helper: add only to RL buffer."""
+        self.rl_buffer.add(exp)
+        self._step += 1
+
+    def add_sl(self, exp: Experience):
+        """Legacy helper: add only to SL buffer."""
+        self.sl_buffer.add(exp)
+        self._step += 1
+
     def stats(self) -> Dict[str, int]:
         return {
             "rl_buffer_size": len(self.rl_buffer),
