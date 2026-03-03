@@ -1,6 +1,6 @@
 <div align="center">
   
-# 🦅 FALCON-Force-multiplying Adaptive Learning & Command Overmatch Network
+# 🦅 FALCON : Force-multiplying Adaptive Learning & Command Overmatch Network
 
 *Ontology-driven combat simulation and decision-support research stack combining simulation, GNN uncertainty modeling, RL training, HITL controls, and evaluation tooling.*
 
