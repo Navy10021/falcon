@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦅 FALCON : Force-multiplying Adaptive Learning & Cognitive Operation Network
+# 🦅 FALCON-Force-multiplying Adaptive Learning & Command Operations Network
 
 ### *다영역 온톨로지 기반 Bayesian GNN + 적대적 강화학습 + Human-in-the-Loop 전투 의사결정 지원 플랫폼*
 
