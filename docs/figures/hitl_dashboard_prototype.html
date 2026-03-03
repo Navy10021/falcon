@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FALCON HITL Dashboard — Prototype Snapshot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; background: #0a0e17; color: #e0e0e0; }
+
+        /* ── HEADER ── */
+        .header {
+            background: #111827;
+            padding: 14px 24px;
+            border-bottom: 2px solid #1e40af;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .header h1 { font-size: 20px; color: #60a5fa; font-weight: 700; letter-spacing: 0.04em; }
+        .header-right { display: flex; gap: 8px; align-items: center; }
+        .badge {
+            background: #1e40af; padding: 4px 12px; border-radius: 12px;
+            font-size: 11px; color: #93c5fd; font-weight: 600;
+        }
+        .badge-green { background: #14532d; color: #4ade80; }
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: #22c55e;
+            box-shadow: 0 0 6px #22c55e; display: inline-block; margin-right: 4px;
+        }
+
+        /* ── NOTE BANNER ── */
+        .note-banner {
+            background: #1e293b; border-left: 4px solid #60a5fa;
+            padding: 10px 20px; font-size: 12px; color: #93c5fd;
+            display: flex; align-items: center; gap: 8px;
+        }
+
+        /* ── LAYOUT ── */
+        .container { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px; }
+        .full-width { grid-column: 1 / -1; }
+        .three-col { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+        .panel {
+            background: #111827; border: 1px solid #1e3a5f;
+            border-radius: 10px; padding: 16px;
+        }
+        .panel h2 { color: #93c5fd; font-size: 14px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+        .panel-subtitle { color: #64748b; font-size: 11px; margin-top: -8px; margin-bottom: 12px; }
+
+        /* ── BATTLE STATUS METRICS ── */
+        .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+        .metric-box {
+            background: #1e293b; border: 1px solid #1e3a5f; border-radius: 6px;
+            padding: 10px 12px; text-align: center;
+        }
+        .metric-value { font-size: 22px; font-weight: 700; color: #60a5fa; }
+        .metric-value.green { color: #22c55e; }
+        .metric-value.red { color: #ef4444; }
+        .metric-value.yellow { color: #f59e0b; }
+        .metric-label { font-size: 10px; color: #9ca3af; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+        /* ── PROGRESS BAR ── */
+        .progress-bar-bg {
+            background: #1e293b; border-radius: 4px; height: 6px; overflow: hidden; margin-bottom: 4px;
+        }
+        .progress-bar-fill { background: linear-gradient(90deg, #3b82f6, #60a5fa); height: 100%; border-radius: 4px; }
+        .progress-label { font-size: 11px; color: #6b7280; }
+
+        /* ── FORCE STATUS ── */
+        .force-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .force-label { font-size: 12px; width: 100px; }
+        .force-bar-bg { flex: 1; background: #1e293b; border-radius: 3px; height: 8px; overflow: hidden; margin: 0 8px; }
+        .force-bar-blue { background: #3b82f6; height: 100%; border-radius: 3px; }
+        .force-bar-red { background: #ef4444; height: 100%; border-radius: 3px; }
+        .force-value { font-size: 12px; width: 50px; text-align: right; }
+
+        /* ── STRATEGY CARDS ── */
+        .strategy-card {
+            background: #1e293b; border: 1px solid #334155;
+            border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s;
+        }
+        .strategy-card:hover { border-color: #60a5fa; }
+        .strategy-card.recommended { border-color: #22c55e; border-width: 2px; }
+        .strategy-card.selected { border-color: #f59e0b; border-width: 2px; }
+        .strategy-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .strategy-name { font-weight: 700; font-size: 13px; color: #e2e8f0; }
+        .risk-badge {
+            padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase;
+        }
+        .risk-low { background: #14532d; color: #4ade80; }
+        .risk-medium { background: #713f12; color: #fbbf24; }
+        .risk-high { background: #7f1d1d; color: #f87171; }
+        .rec-tag { font-size: 10px; background: #15803d; color: #bbf7d0; padding: 2px 8px; border-radius: 10px; }
+        .strategy-metrics { display: flex; gap: 16px; font-size: 12px; color: #9ca3af; }
+        .strategy-metrics span { display: flex; gap: 4px; }
+        .strategy-metrics strong { color: #e0e0e0; }
+        .strategy-desc { font-size: 11px; color: #6b7280; margin-top: 6px; }
+
+        /* ── CONSTRAINT PANEL ── */
+        .constraint-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+        .constraint-item {
+            background: #1e293b; border: 1px solid #1e3a5f; border-radius: 6px; padding: 8px 12px;
+        }
+        .constraint-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+        .constraint-value { font-size: 15px; font-weight: 700; color: #60a5fa; margin-top: 2px; }
+        .constraint-bool { color: #22c55e; }
+
+        /* ── COMMAND PANEL ── */
+        .command-box {
+            background: #0f172a; border: 1px solid #1e3a5f; border-radius: 6px;
+            padding: 10px 14px; margin-bottom: 8px;
+        }
+        .command-item { margin-bottom: 8px; font-size: 12px; }
+        .cmd-time { color: #6b7280; font-size: 10px; margin-bottom: 2px; }
+        .cmd-text { color: #e2e8f0; }
+        .cmd-response { color: #4ade80; margin-top: 3px; }
+        .cmd-parsed { color: #93c5fd; }
+
+        /* ── PARETO SVG ── */
+        #pareto-svg-container {
+            background: #0f172a; border: 1px solid #1e3a5f; border-radius: 8px;
+            width: 100%; position: relative; overflow: hidden;
+        }
+        #pareto-svg-container svg { width: 100%; display: block; }
+
+        /* ── NL RESPONSE ── */
+        .nl-response {
+            background: #0f172a; border: 1px solid #1e3a5f; border-radius: 6px;
+            padding: 10px 14px; font-size: 12px; font-family: monospace;
+        }
+        .nl-key { color: #93c5fd; }
+        .nl-val { color: #4ade80; }
+
+        /* ── TIMELINE ── */
+        .timeline { font-size: 11px; }
+        .timeline-item { display: flex; gap: 10px; margin-bottom: 8px; }
+        .tl-dot {
+            width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 3px;
+        }
+        .tl-dot-blue { background: #3b82f6; }
+        .tl-dot-green { background: #22c55e; }
+        .tl-dot-yellow { background: #f59e0b; }
+        .tl-label { font-size: 10px; color: #64748b; }
+        .tl-text { color: #9ca3af; }
+        .tl-text strong { color: #e0e0e0; }
+
+        /* ── SECTION LABEL ── */
+        .section-label {
+            font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: 0.08em;
+            margin-bottom: 4px; margin-top: 6px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+    <h1>⚡ FALCON HITL Command Interface</h1>
+    <div class="header-right">
+        <span><span class="status-dot"></span><span style="font-size:12px;color:#4ade80">LIVE</span></span>
+        <span class="badge">R14 Pareto Selection</span>
+        <span class="badge badge-green">Session: demo_session</span>
+        <span style="font-size:11px;color:#6b7280">Step 12 / 50</span>
+    </div>
+</div>
+
+<!-- NOTE BANNER -->
+<div class="note-banner">
+    <span>📌</span>
+    <span><strong>프로토타입 정적 스냅샷</strong> — 실행 명령: <code>python -m hitl.web_interface --port 8050</code>
+    | Flask REST API + HTML 대시보드 | 합성 전투 시나리오 데이터 (seed=42, Blue×8 / Red×6 unit)</span>
+</div>
+
+<div class="container">
+
+    <!-- ═══════════════════════════════════════════════
+         ROW 1: BATTLE STATUS + STRATEGY OPTIONS
+         ═══════════════════════════════════════════════ -->
+
+    <!-- LEFT: Battle Status -->
+    <div class="panel">
+        <h2>Battle Status</h2>
+        <p class="panel-subtitle">실시간 전투 상황 모니터링 (시뮬레이터 연동)</p>
+
+        <div class="metrics-grid">
+            <div class="metric-box">
+                <div class="metric-value green">82.3%</div>
+                <div class="metric-label">Win Rate</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-value">1,240</div>
+                <div class="metric-label">Blue Force</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-value red">860</div>
+                <div class="metric-label">Red Force</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-value green">NORMAL</div>
+                <div class="metric-label">Alert Level</div>
+            </div>
+        </div>
+
+        <div class="section-label">Mission Progress</div>
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill" style="width:24%"></div>
+        </div>
+        <div class="progress-label">Step 12 / 50 &nbsp;(24.0%)</div>
+
+        <div style="margin-top:12px">
+            <div class="section-label">Force Strength</div>
+            <div class="force-row">
+                <span class="force-label" style="color:#60a5fa">🔵 Blue</span>
+                <div class="force-bar-bg">
+                    <div class="force-bar-blue" style="width:59%"></div>
+                </div>
+                <span class="force-value">1,193</span>
+            </div>
+            <div class="force-row">
+                <span class="force-label" style="color:#ef4444">🔴 Red</span>
+                <div class="force-bar-bg">
+                    <div class="force-bar-red" style="width:79%"></div>
+                </div>
+                <span class="force-value">677</span>
+            </div>
+        </div>
+
+        <div style="margin-top:12px">
+            <div class="section-label">Casualty Summary</div>
+            <div style="font-size:12px; color:#9ca3af; margin-top:4px">
+                Blue casualties: <strong style="color:#60a5fa">47</strong> &nbsp;|&nbsp;
+                Red casualties: <strong style="color:#ef4444">183</strong>
+            </div>
+            <div style="font-size:12px; color:#9ca3af; margin-top:3px">
+                Mission status: <strong style="color:#22c55e">ongoing</strong>
+            </div>
+        </div>
+
+        <!-- Commander Constraints Applied -->
+        <div style="margin-top:14px">
+            <h2 style="margin-bottom:8px">Active Constraints</h2>
+            <div class="constraint-grid">
+                <div class="constraint-item">
+                    <div class="constraint-label">Min Win Prob</div>
+                    <div class="constraint-value">≥ 65%</div>
+                </div>
+                <div class="constraint-item">
+                    <div class="constraint-label">Max Casualties</div>
+                    <div class="constraint-value">≤ 60</div>
+                </div>
+                <div class="constraint-item">
+                    <div class="constraint-label">Max Time Steps</div>
+                    <div class="constraint-value">≤ 50</div>
+                </div>
+                <div class="constraint-item">
+                    <div class="constraint-label">Prefer Flanking</div>
+                    <div class="constraint-value constraint-bool">✓ ON</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT: Strategy Options -->
+    <div class="panel">
+        <h2>Pareto Strategy Options</h2>
+        <p class="panel-subtitle">Bayesian MC 평가 기반 Pareto 최적 후보 (5개)</p>
+
+        <!-- Strategy 0: RECOMMENDED -->
+        <div class="strategy-card recommended">
+            <div class="strategy-header">
+                <span class="strategy-name">flanking_maneuver</span>
+                <span style="display:flex;gap:6px">
+                    <span class="rec-tag">★ Recommended</span>
+                    <span class="risk-badge risk-low">LOW</span>
+                </span>
+            </div>
+            <div class="strategy-metrics">
+                <span>Win: <strong>82.3%</strong></span>
+                <span>Casualties: <strong>18.4</strong></span>
+                <span>Time: <strong>22.5 steps</strong></span>
+                <span>Force: <strong>320</strong></span>
+            </div>
+            <div class="strategy-desc">우측 측면 기동 → 포위 후 압박. 사상자 최소화, 시간 여유 필요.</div>
+        </div>
+
+        <!-- Strategy 3: Encirclement (high win) -->
+        <div class="strategy-card">
+            <div class="strategy-header">
+                <span class="strategy-name">encirclement</span>
+                <span class="risk-badge risk-low">LOW</span>
+            </div>
+            <div class="strategy-metrics">
+                <span>Win: <strong>89.1%</strong></span>
+                <span>Casualties: <strong>12.1</strong></span>
+                <span>Time: <strong>38.0 steps</strong></span>
+                <span>Force: <strong>510</strong></span>
+            </div>
+            <div class="strategy-desc">완전 포위 작전. 최고 승률, 최저 사상자 – 대병력·장시간 필요.</div>
+        </div>
+
+        <!-- Strategy 4: Cyber -->
+        <div class="strategy-card">
+            <div class="strategy-header">
+                <span class="strategy-name">cyber_disruption</span>
+                <span class="risk-badge risk-medium">MEDIUM</span>
+            </div>
+            <div class="strategy-metrics">
+                <span>Win: <strong>74.2%</strong></span>
+                <span>Casualties: <strong>8.3</strong></span>
+                <span>Time: <strong>28.0 steps</strong></span>
+                <span>Force: <strong>180</strong></span>
+            </div>
+            <div class="strategy-desc">사이버 전자전 선행 → 지휘통신 마비 후 소규모 침투.</div>
+        </div>
+
+        <!-- Strategy 1: Artillery -->
+        <div class="strategy-card">
+            <div class="strategy-header">
+                <span class="strategy-name">artillery_suppression</span>
+                <span class="risk-badge risk-medium">MEDIUM</span>
+            </div>
+            <div class="strategy-metrics">
+                <span>Win: <strong>76.1%</strong></span>
+                <span>Casualties: <strong>31.7</strong></span>
+                <span>Time: <strong>15.0 steps</strong></span>
+                <span>Force: <strong>280</strong></span>
+            </div>
+            <div class="strategy-desc">포병 제압 후 보병 돌격. 빠른 종결, 중간 수준 사상자.</div>
+        </div>
+
+        <!-- Strategy 2: Direct -->
+        <div class="strategy-card">
+            <div class="strategy-header">
+                <span class="strategy-name">direct_assault</span>
+                <span class="risk-badge risk-high">HIGH</span>
+            </div>
+            <div class="strategy-metrics">
+                <span>Win: <strong>68.9%</strong></span>
+                <span>Casualties: <strong>54.2</strong></span>
+                <span>Time: <strong>11.0 steps</strong></span>
+                <span>Force: <strong>450</strong></span>
+            </div>
+            <div class="strategy-desc">정면 돌격. 최단 시간 종결 가능, 높은 사상자 위험.</div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════
+         ROW 2: PARETO VISUALIZATION (full width)
+         ═══════════════════════════════════════════════ -->
+    <div class="panel full-width">
+        <h2>Pareto Front Visualization — Win Probability vs Expected Casualties</h2>
+        <p class="panel-subtitle">버블 크기 = 병력 규모 | 색상 = 위험도 (녹=Low, 황=Medium, 적=High) | ★ = 추천 전략</p>
+        <div id="pareto-svg-container">
+            <svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
+                <!-- Background grid -->
+                <rect width="900" height="320" fill="#0f172a"/>
+                <!-- Grid lines -->
+                <g stroke="#1e3557" stroke-width="0.5">
+                    <line x1="80" y1="20" x2="880" y2="20"/>
+                    <line x1="80" y1="80" x2="880" y2="80"/>
+                    <line x1="80" y1="140" x2="880" y2="140"/>
+                    <line x1="80" y1="200" x2="880" y2="200"/>
+                    <line x1="80" y1="260" x2="880" y2="260"/>
+                    <line x1="80" y1="290" x2="880" y2="290"/>
+                    <line x1="80" y1="20" x2="80" y2="295"/>
+                    <line x1="240" y1="20" x2="240" y2="295"/>
+                    <line x1="400" y1="20" x2="400" y2="295"/>
+                    <line x1="560" y1="20" x2="560" y2="295"/>
+                    <line x1="720" y1="20" x2="720" y2="295"/>
+                    <line x1="880" y1="20" x2="880" y2="295"/>
+                </g>
+                <!-- Axes -->
+                <line x1="80" y1="290" x2="885" y2="290" stroke="#334155" stroke-width="1.5"/>
+                <line x1="80" y1="15" x2="80" y2="290" stroke="#334155" stroke-width="1.5"/>
+
+                <!-- Axis labels -->
+                <text x="480" y="315" fill="#6b7280" font-size="11" text-anchor="middle">Win Probability →</text>
+                <text x="20" y="165" fill="#6b7280" font-size="11" text-anchor="middle" transform="rotate(-90,20,165)">Expected Casualties ↑</text>
+
+                <!-- X-axis ticks: 0.60 to 0.95 -->
+                <text x="80" y="305" fill="#475569" font-size="9" text-anchor="middle">0.60</text>
+                <text x="240" y="305" fill="#475569" font-size="9" text-anchor="middle">0.68</text>
+                <text x="400" y="305" fill="#475569" font-size="9" text-anchor="middle">0.76</text>
+                <text x="560" y="305" fill="#475569" font-size="9" text-anchor="middle">0.84</text>
+                <text x="720" y="305" fill="#475569" font-size="9" text-anchor="middle">0.92</text>
+                <text x="880" y="305" fill="#475569" font-size="9" text-anchor="middle">1.00</text>
+
+                <!-- Y-axis ticks: 0 to 65 -->
+                <text x="72" y="294" fill="#475569" font-size="9" text-anchor="end">0</text>
+                <text x="72" y="234" fill="#475569" font-size="9" text-anchor="end">13</text>
+                <text x="72" y="174" fill="#475569" font-size="9" text-anchor="end">26</text>
+                <text x="72" y="114" fill="#475569" font-size="9" text-anchor="end">39</text>
+                <text x="72" y="54" fill="#475569" font-size="9" text-anchor="end">52</text>
+                <text x="72" y="24" fill="#475569" font-size="9" text-anchor="end">65</text>
+
+                <!-- Pareto front line (dashed) -->
+                <!-- cyber(0.742,8.3) → flanking(0.823,18.4) → encirclement(0.891,12.1) → sorted by x -->
+                <!-- Sorted: cyber(0.742,8.3), artillery(0.761,31.7), flanking(0.823,18.4), encirclement(0.891,12.1) -->
+                <!-- Pareto front: cyber, flanking, encirclement (dominate others on win and casualty) -->
+                <!-- x=0.742 → px = 80+(0.742-0.60)/(1.00-0.60)*800 = 80+0.142/0.40*800 = 80+284=364 -->
+                <!-- x=0.823 → px = 80+(0.823-0.60)/0.40*800 = 80+446=526 -->
+                <!-- x=0.891 → px = 80+(0.891-0.60)/0.40*800 = 80+582=662 -->
+                <!-- y=8.3 → py = 290-(8.3/65)*270 = 290-34.5=255.5 -->
+                <!-- y=18.4 → py = 290-(18.4/65)*270 = 290-76.5=213.5 -->
+                <!-- y=12.1 → py = 290-(12.1/65)*270 = 290-50.3=239.7 -->
+                <polyline points="364,255 526,213 662,240"
+                    fill="none" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.5"/>
+                <text x="500" y="185" fill="#22c55e" font-size="10" opacity="0.7">— Pareto Front —</text>
+
+                <!-- Constraint boundary: max_casualties=60, min_win=0.65 -->
+                <!-- x=0.65 → px = 80+(0.65-0.60)/0.40*800 = 80+100=180 -->
+                <!-- y=60 → py = 290-(60/65)*270 = 290-249=41 -->
+                <line x1="180" y1="15" x2="180" y2="290" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>
+                <line x1="80" y1="41" x2="885" y2="41" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>
+                <text x="183" y="12" fill="#f59e0b" font-size="9" opacity="0.8">min_win≥0.65</text>
+                <text x="82" y="39" fill="#f59e0b" font-size="9" opacity="0.8">max_cas≤60</text>
+
+                <!-- ── Strategy 2: direct_assault (0.689, 54.2) risk=high ── -->
+                <!-- px=80+(0.689-0.60)/0.40*800=80+178=258, py=290-(54.2/65)*270=290-225=65 -->
+                <circle cx="258" cy="65" r="22" fill="#ef4444" opacity="0.75"/>
+                <text x="258" y="70" fill="white" font-size="9" text-anchor="middle" font-weight="bold">direct</text>
+                <text x="258" y="99" fill="#ef4444" font-size="9" text-anchor="middle">68.9%|54.2</text>
+
+                <!-- ── Strategy 1: artillery_suppression (0.761, 31.7) risk=medium ── -->
+                <!-- px=80+(0.761-0.60)/0.40*800=80+322=402, py=290-(31.7/65)*270=290-131.7=158 -->
+                <circle cx="402" cy="158" r="17" fill="#f59e0b" opacity="0.75"/>
+                <text x="402" y="163" fill="white" font-size="9" text-anchor="middle" font-weight="bold">arty</text>
+                <text x="402" y="185" fill="#f59e0b" font-size="9" text-anchor="middle">76.1%|31.7</text>
+
+                <!-- ── Strategy 0: flanking_maneuver (0.823, 18.4) risk=low RECOMMENDED ── -->
+                <!-- px=80+(0.823-0.60)/0.40*800=80+446=526, py=290-(18.4/65)*270=290-76.5=213.5 -->
+                <circle cx="526" cy="213" r="20" fill="#22c55e" opacity="0.85"/>
+                <circle cx="526" cy="213" r="24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-dasharray="4,2"/>
+                <text x="526" y="218" fill="white" font-size="9" text-anchor="middle" font-weight="bold">flank</text>
+                <text x="526" y="200" fill="#22c55e" font-size="10" text-anchor="middle">★</text>
+                <text x="526" y="243" fill="#22c55e" font-size="9" text-anchor="middle">82.3%|18.4</text>
+
+                <!-- ── Strategy 4: cyber_disruption (0.742, 8.3) risk=medium ── -->
+                <!-- px=80+(0.742-0.60)/0.40*800=80+284=364, py=290-(8.3/65)*270=290-34.5=255.5 -->
+                <circle cx="364" cy="255" r="12" fill="#a78bfa" opacity="0.80"/>
+                <text x="364" y="259" fill="white" font-size="8" text-anchor="middle" font-weight="bold">cyber</text>
+                <text x="364" y="273" fill="#a78bfa" font-size="9" text-anchor="middle">74.2%|8.3</text>
+
+                <!-- ── Strategy 3: encirclement (0.891, 12.1) risk=low ── -->
+                <!-- px=80+(0.891-0.60)/0.40*800=80+582=662, py=290-(12.1/65)*270=290-50.3=239.7 -->
+                <circle cx="662" cy="240" r="26" fill="#38bdf8" opacity="0.80"/>
+                <text x="662" y="245" fill="white" font-size="9" text-anchor="middle" font-weight="bold">encircle</text>
+                <text x="662" y="271" fill="#38bdf8" font-size="9" text-anchor="middle">89.1%|12.1</text>
+
+                <!-- Legend -->
+                <rect x="720" y="30" width="150" height="100" rx="4" fill="#111827" stroke="#1e3557"/>
+                <text x="730" y="48" fill="#9ca3af" font-size="10" font-weight="bold">Legend</text>
+                <circle cx="740" cy="62" r="6" fill="#22c55e" opacity="0.85"/>
+                <text x="750" y="66" fill="#9ca3af" font-size="9">Low Risk</text>
+                <circle cx="740" cy="80" r="6" fill="#f59e0b" opacity="0.85"/>
+                <text x="750" y="84" fill="#9ca3af" font-size="9">Medium Risk</text>
+                <circle cx="740" cy="98" r="6" fill="#ef4444" opacity="0.85"/>
+                <text x="750" y="102" fill="#9ca3af" font-size="9">High Risk</text>
+                <circle cx="740" cy="116" r="6" fill="#a78bfa" opacity="0.85"/>
+                <text x="750" y="120" fill="#9ca3af" font-size="9">Cyber</text>
+                <circle cx="740" cy="116" r="0" fill="none"/>
+                <text x="730" y="118" fill="#9ca3af" font-size="9"> </text>
+            </svg>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════
+         ROW 3: NL COMMAND / HISTORY / SELECTION DEMO
+         ═══════════════════════════════════════════════ -->
+    <div class="panel">
+        <h2>Natural Language Command Interface</h2>
+        <p class="panel-subtitle">지휘관 자연어 명령 → 제약 조건 파싱 (NLI 모듈)</p>
+
+        <!-- Command history -->
+        <div class="command-box">
+            <div class="command-item">
+                <div class="cmd-time">▶ [T=0] Init</div>
+                <div class="cmd-text">POST /api/session/init {"n_blue":8,"n_red":6}</div>
+                <div class="cmd-response">✓ Session initialized. 5 Pareto strategies generated.</div>
+            </div>
+
+            <div class="command-item">
+                <div class="cmd-time">▶ [T=1] Commander Input</div>
+                <div class="cmd-text">"사상자를 최소화하고, 승률은 65% 이상 유지해줘"</div>
+                <div class="cmd-parsed">→ intent: minimize_casualties | min_win_prob: 0.65</div>
+                <div class="cmd-response">✓ Constraints applied. Pareto re-evaluated.</div>
+            </div>
+
+            <div class="command-item">
+                <div class="cmd-time">▶ [T=2] Constraint Update</div>
+                <div class="cmd-text">POST /api/constraints/update {"prefer_flanking":true,"max_casualties":60}</div>
+                <div class="cmd-response">✓ 5 candidates regenerated. All satisfy constraints.</div>
+            </div>
+
+            <div class="command-item">
+                <div class="cmd-time">▶ [T=3] Strategy Selection</div>
+                <div class="cmd-text">POST /api/strategy/select {"strategy_id":"strategy_0"}</div>
+                <div class="cmd-response" style="color:#fbbf24">✓ 'flanking_maneuver' selected. Executing.</div>
+            </div>
+        </div>
+
+        <div class="section-label">마지막 자연어 파싱 결과 (API 응답)</div>
+        <div class="nl-response">
+<span class="nl-key">"intent"</span>: <span class="nl-val">"minimize_casualties"</span>,<br>
+<span class="nl-key">"constraints"</span>: {<br>
+&nbsp;&nbsp;<span class="nl-key">"min_win_probability"</span>: <span class="nl-val">0.65</span>,<br>
+&nbsp;&nbsp;<span class="nl-key">"max_casualties"</span>: <span class="nl-val">60</span><br>
+},<br>
+<span class="nl-key">"confidence"</span>: <span class="nl-val">0.87</span>,<br>
+<span class="nl-key">"needs_clarification"</span>: <span class="nl-val">false</span>,<br>
+<span class="nl-key">"summary"</span>: <span class="nl-val">"사상자 최소화, 승률 ≥65% 제약 적용"</span>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Decision History &amp; Audit Trail</h2>
+        <p class="panel-subtitle">HITL 의사결정 이력 (설명가능성 R12)</p>
+
+        <div class="timeline">
+            <div class="timeline-item">
+                <div class="tl-dot tl-dot-blue"></div>
+                <div>
+                    <div class="tl-label">Step 0 — Scenario Init</div>
+                    <div class="tl-text">Blue×8 units (1,240 troops), Red×6 units (860 troops)<br>
+                    <strong>Pareto 5-candidate generation</strong> complete.</div>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="tl-dot tl-dot-yellow"></div>
+                <div>
+                    <div class="tl-label">Step 1 — NL Command</div>
+                    <div class="tl-text">"사상자 최소화, 승률 65% 이상" → parsed<br>
+                    Constraints: min_win=0.65, max_cas=60 applied.</div>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="tl-dot tl-dot-yellow"></div>
+                <div>
+                    <div class="tl-label">Step 2 — Constraint Update</div>
+                    <div class="tl-text">prefer_flanking=True → re-rank. <strong>flanking_maneuver</strong> promoted to rank #1.</div>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="tl-dot tl-dot-green"></div>
+                <div>
+                    <div class="tl-label">Step 3 — Strategy Confirmed</div>
+                    <div class="tl-text"><strong>flanking_maneuver</strong> selected by commander.<br>
+                    Win prob: 82.3% | Expected cas: 18.4 | Time: 22.5 steps</div>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="tl-dot tl-dot-blue"></div>
+                <div>
+                    <div class="tl-label">Step 12 — Execution Monitor</div>
+                    <div class="tl-text">Blue cas: 47, Red cas: 183 | Alert: <strong style="color:#22c55e">NORMAL</strong><br>
+                    Progress: 24% | Mission ongoing.</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top:14px">
+            <div class="section-label">REST API Endpoints</div>
+            <div style="font-size:11px; font-family:monospace; color:#9ca3af; line-height:1.9">
+                <span style="color:#60a5fa">GET</span>  /api/session/state<br>
+                <span style="color:#22c55e">POST</span> /api/session/init<br>
+                <span style="color:#22c55e">POST</span> /api/command<br>
+                <span style="color:#22c55e">POST</span> /api/strategy/select<br>
+                <span style="color:#22c55e">POST</span> /api/constraints/update<br>
+                <span style="color:#60a5fa">GET</span>  /api/pareto/data
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- FOOTER -->
+<div style="text-align:center; padding:12px; font-size:11px; color:#374151; border-top:1px solid #1e293b; margin-top:4px">
+    FALCON HITL Dashboard Prototype — python -m hitl.web_interface --port 8050 &nbsp;|&nbsp;
+    Flask REST API + HTML &nbsp;|&nbsp; Synthetic Data (Academic Research) &nbsp;|&nbsp; 2026-03-03
+</div>
+
+</body>
+</html>
