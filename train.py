@@ -193,12 +193,26 @@ def train_phase1(args):
     from simulator.combat_dynamics import CombatDynamicsManager  # 단기: 역학 통합
     from ontology.multidomain import MultiDomainAnalyzer          # 중기: 멀티도메인 분석
     from ontology.temporal_extension import TemporalStateTracker  # 시계열 트렌드 연동
+    from explainability.counterfactual_feedback import (        # R13: CF 피드백
+        CounterfactualFeedbackLoop, CounterfactualFeedbackConfig,
+    )
 
     engine = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)  # P3-1
     dynamics        = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합 관리
     md_analyzer     = MultiDomainAnalyzer(seed=args.seed)    # 중기: 공-해-지 도메인 상태 추적
     temporal_tracker = TemporalStateTracker(window_size=10)  # 시계열 트렌드 추적
+
+    # R13: Counterfactual 보상 피드백 루프
+    cf_config = CounterfactualFeedbackConfig(
+        enabled=True,
+        n_actions=BlueActionSpace.N_ACTIONS,
+        warmup_episodes=max(10, args.episodes // 20),
+        cf_interval=max(1, args.episodes // 100),  # ~1% 에피소드마다 CF 분석
+    )
+    cf_loop = CounterfactualFeedbackLoop(config=cf_config)
+    logger.info("  [R13] Counterfactual feedback enabled: warmup=%d, interval=%d",
+                cf_config.warmup_episodes, cf_config.cf_interval)
     curriculum = CurriculumScheduler()
     gnn = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim = torch.optim.Adam(gnn.parameters(), lr=1e-3)
@@ -239,12 +253,16 @@ def train_phase1(args):
         episode_reward = 0
         done = False
         step_result = None
+        episode_rewards_list = []  # R13: 스텝별 보상 기록
 
         # GNN 훈련 데이터 수집
         gnn_batch_x, gnn_batch_adj, gnn_batch_targets = [], [], []
 
         # P1-1: 스텝별 병력 추적 (직전 스텝 대비 절감 보상)
         prev_blue_hc = initial_blue_hc
+
+        # R13: CF 에피소드 시작
+        cf_loop.begin_episode()
 
         for step_t in range(50):
             if done:
@@ -327,6 +345,10 @@ def train_phase1(args):
             reward += dynamics.get_supply_penalty(ForceAlignment.BLUE, kg) * 0.5
             prev_blue_hc = step_result.blue_total_headcount
             episode_reward += reward
+            episode_rewards_list.append(reward)  # R13
+
+            # R13: CF 스텝 기록 (kg 스냅샷)
+            cf_loop.record_step(step_t, action, reward, copy.deepcopy(kg))
 
             blue_agent.buffer.add(state, action, reward, log_prob, value, done, avg_unc)
 
@@ -340,6 +362,14 @@ def train_phase1(args):
                 "blue_casualties": torch.tensor(blue_cas, dtype=torch.float32),
                 "risk_score":      torch.tensor(risk_score, dtype=torch.float32),
             })
+
+        # R13: 에피소드 종료 → CF 분석 및 PPO 버퍼 보상 보정
+        shaped_rewards = cf_loop.end_episode(
+            episode_rewards_list, engine,
+            ForceAlignment, UnitStatus, BlueActionSpace,
+            build_action_pairs_fn=_build_blue_action_pairs,
+        )
+        cf_loop.apply_to_buffer(blue_agent.buffer, shaped_rewards, episode_rewards_list)
 
         # PPO 업데이트
         ppo_metrics = blue_agent.update()
@@ -399,6 +429,20 @@ def train_phase1(args):
     torch.save(gnn.state_dict(), os.path.join(args.checkpoint_dir, "gnn_phase1_final.pt"))
     logger.info("[Phase 1] 훈련 완료 | 최종 Blue 승률: %.1f%%",
                 np.mean(win_rate_history[-100:]) * 100)
+
+    # R13: CF 피드백 요약 로깅
+    cf_summary = cf_loop.get_summary()
+    logger.info("[R13] CF Feedback: shaped=%d/%d eps, cumulative_regret=%.3f, shaping_rate=%.3f",
+                cf_summary["cf_episodes_shaped"], cf_summary["cf_episodes_total"],
+                cf_summary["cumulative_regret"], cf_summary["shaping_rate"])
+    tracker = getattr(args, "tracker", None)
+    if tracker is not None:
+        tracker.log_evaluation(
+            step=args.episodes,
+            report={f"r13/{k}": v for k, v in cf_summary.items()
+                    if isinstance(v, (int, float))},
+            phase="r13_cf_feedback",
+        )
 
 
 def train_phase2(args):
