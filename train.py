@@ -179,6 +179,30 @@ def _build_blue_maneuver_targets(kg, blue_action, ForceAlignment, UnitStatus, Bl
     return targets
 
 
+def _setup_cf_loop(args, n_actions: int):
+    """
+    공통 Counterfactual 피드백 루프 팩토리.
+
+    Phase 1·3·4에서 동일한 설정으로 CounterfactualFeedbackLoop를 생성한다.
+    phase별로 직접 import·config를 반복하는 것을 방지한다.
+    """
+    from explainability.counterfactual_feedback import (
+        CounterfactualFeedbackLoop, CounterfactualFeedbackConfig,
+    )
+    cf_config = CounterfactualFeedbackConfig(
+        enabled=True,
+        n_actions=n_actions,
+        warmup_episodes=max(10, args.episodes // 20),
+        cf_interval=max(1, args.episodes // 100),
+    )
+    cf_loop = CounterfactualFeedbackLoop(config=cf_config)
+    logger.info(
+        "  [R13] CF 피드백 활성화: warmup=%d, interval=%d",
+        cf_config.warmup_episodes, cf_config.cf_interval,
+    )
+    return cf_loop
+
+
 def train_phase1(args):
     """Phase 1: Uncertainty-Aware GNN + Blue PPO 훈련"""
     logger.info("[Phase 1] Uncertainty-Aware GNN + PPO 훈련 시작")
@@ -193,26 +217,14 @@ def train_phase1(args):
     from simulator.combat_dynamics import CombatDynamicsManager  # 단기: 역학 통합
     from ontology.multidomain import MultiDomainAnalyzer          # 중기: 멀티도메인 분석
     from ontology.temporal_extension import TemporalStateTracker  # 시계열 트렌드 연동
-    from explainability.counterfactual_feedback import (        # R13: CF 피드백
-        CounterfactualFeedbackLoop, CounterfactualFeedbackConfig,
-    )
-
     engine = LanchesterEngine(seed=args.seed)
     maneuver_engine = ManeuverEngine(map_size=30, seed=args.seed)  # P3-1
     dynamics        = CombatDynamicsManager(seed=args.seed)  # 단기: BDA/보급/EMS 통합 관리
     md_analyzer     = MultiDomainAnalyzer(seed=args.seed)    # 중기: 공-해-지 도메인 상태 추적
     temporal_tracker = TemporalStateTracker(window_size=10)  # 시계열 트렌드 추적
 
-    # R13: Counterfactual 보상 피드백 루프
-    cf_config = CounterfactualFeedbackConfig(
-        enabled=True,
-        n_actions=BlueActionSpace.N_ACTIONS,
-        warmup_episodes=max(10, args.episodes // 20),
-        cf_interval=max(1, args.episodes // 100),  # ~1% 에피소드마다 CF 분석
-    )
-    cf_loop = CounterfactualFeedbackLoop(config=cf_config)
-    logger.info("  [R13] Counterfactual feedback enabled: warmup=%d, interval=%d",
-                cf_config.warmup_episodes, cf_config.cf_interval)
+    # R13: Counterfactual 보상 피드백 루프 — 공통 헬퍼 사용
+    cf_loop = _setup_cf_loop(args, n_actions=BlueActionSpace.N_ACTIONS)
     curriculum = CurriculumScheduler()
     gnn = BayesianHGT(node_in_dim=128, hidden_dim=128, n_layers=2, mc_samples=args.mc_samples)
     gnn_optim = torch.optim.Adam(gnn.parameters(), lr=1e-3)
@@ -518,6 +530,11 @@ def train_phase3(args):
         n_simulations=_n_mc_sims, max_steps_per_sim=20, seed=args.seed
     )
     logger.info("  [중기] MCParetoValidator 활성화: %d sims/후보", _n_mc_sims)
+
+    # R13: Phase 3에도 CF 피드백 활성화 (HITL 선택 품질 향상)
+    from rl_agent.blue_agent import BlueActionSpace as _BA3
+    cf_loop_p3 = _setup_cf_loop(args, n_actions=_BA3.N_ACTIONS)
+
     phase3_stats = {"episodes": args.episodes, "all_violated_episodes": 0}
 
     for ep in range(args.episodes):
@@ -575,6 +592,17 @@ def train_phase3(args):
             )
         )
 
+        # R13: CF 피드백 — 선택된 전략의 예상 보상을 에피소드 보상으로 근사
+        _ep_rewards_p3 = [selected.win_probability * 10.0 - selected.expected_casualties * 0.1]
+        _action_idx_p3 = int(ranked_options.index(selected))
+        cf_loop_p3.begin_episode()
+        cf_loop_p3.record_step(0, _action_idx_p3, _ep_rewards_p3[0], kg)
+        # Phase 3은 별도 엔진 없으므로 warmup 기간만 소비 (보상 보정 없음)
+        cf_loop_p3.end_episode(
+            _ep_rewards_p3, None,
+            None, None, None,
+        )
+
         if ep % args.log_interval == 0 and ep > 0:
             logger.info(
                 "EP %5d/%d | Adoption=%.1f%% | AI=%-8s | Selected=%-8s | WinP=%.1f%%",
@@ -608,6 +636,11 @@ def train_phase3(args):
 
     logger.info("[Phase 3] HITL 통합 완료 | AI 추천 채택률: %.1f%%", learner.adoption_rate * 100)
     logger.info("  선호도 저장: %s | 메트릭 저장: %s", pref_path, metrics_path)
+
+    cf3_summary = cf_loop_p3.get_summary()
+    logger.info("[R13/Phase3] CF Feedback: shaped=%d/%d eps, shaping_rate=%.3f",
+                cf3_summary["cf_episodes_shaped"], cf3_summary["cf_episodes_total"],
+                cf3_summary["shaping_rate"])
 
 
 def train_phase4(args):
@@ -674,6 +707,10 @@ def train_phase4(args):
         blue_agent.load(args.blue_checkpoint)
         logger.info("  Blue 에이전트 체크포인트 로드: %s", args.blue_checkpoint)
 
+    # R13: Phase 4에도 CF 피드백 활성화
+    from rl_agent.blue_agent import BlueActionSpace as _BA4
+    cf_loop_p4 = _setup_cf_loop(args, n_actions=_BA4.N_ACTIONS)
+
     os.makedirs(args.checkpoint_dir, exist_ok=True)
     rewards_history   = []
     win_rate_history  = []
@@ -702,6 +739,9 @@ def train_phase4(args):
         episode_reward  = 0.0
         done            = False
         step_result     = None
+        episode_rewards_p4: list = []  # R13: Phase 4 스텝별 보상
+
+        cf_loop_p4.begin_episode()  # R13: Phase 4 CF 에피소드 시작
 
         for step_t in range(50):
             if done:
@@ -807,7 +847,17 @@ def train_phase4(args):
             reward += dynamics.get_supply_penalty(ForceAlignment.BLUE, kg) * 0.5
             prev_blue_hc    = step_result.blue_total_headcount
             episode_reward += reward
+            episode_rewards_p4.append(reward)  # R13
             blue_agent.buffer.add(state, action, reward, log_prob, value, done, avg_unc)
+            cf_loop_p4.record_step(step_t, action, reward, copy.deepcopy(kg))  # R13
+
+        # R13: Phase 4 에피소드 종료 — CF 보상 보정
+        shaped_p4 = cf_loop_p4.end_episode(
+            episode_rewards_p4, engine,
+            ForceAlignment, UnitStatus, BlueActionSpace,
+            build_action_pairs_fn=_build_blue_action_pairs,
+        )
+        cf_loop_p4.apply_to_buffer(blue_agent.buffer, shaped_p4, episode_rewards_p4)
 
         blue_agent.update()
         rewards_history.append(episode_reward)
@@ -827,6 +877,11 @@ def train_phase4(args):
     blue_agent.save(os.path.join(args.checkpoint_dir, "blue_phase4_final.pt"))
     logger.info("[Phase 4] 재학습 완료 | 최종 Blue 승률: %.1f%%",
                 np.mean(win_rate_history[-100:]) * 100)
+
+    cf4_summary = cf_loop_p4.get_summary()
+    logger.info("[R13/Phase4] CF Feedback: shaped=%d/%d eps, shaping_rate=%.3f",
+                cf4_summary["cf_episodes_shaped"], cf4_summary["cf_episodes_total"],
+                cf4_summary["shaping_rate"])
 
 
 

@@ -350,7 +350,9 @@ class AdversarialBenchmark:
 
 if __name__ == "__main__":
     import sys, os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    _project_root = os.path.dirname(os.path.dirname(__file__))
+    if _project_root not in sys.path:
+        sys.path.insert(0, _project_root)
 
     from rl_agent.blue_agent import ActorCritic, BlueActionSpace
     from rl_agent.red_agent import RedAgent

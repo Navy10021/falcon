@@ -284,79 +284,74 @@ class TierCTrainer:
             }, path)
         logger.info("  체크포인트 저장: %s", path)
 
+    def select_action(
+        self, state: np.ndarray, deterministic: bool = False
+    ) -> Tuple[int, float, float]:
+        """
+        BlueAgent 호환 인터페이스 — MonteCarloEvaluator에서 직접 사용 가능.
+
+        MonteCarloEvaluator._evaluate_sequential()은 agent.select_action(state)를
+        호출하므로, TierCTrainer를 동일 평가 경로에서 사용하기 위해 공개 메서드로 노출.
+        """
+        return self._select_action(state)
+
     def evaluate_vs_baseline(self, n_runs: int = 50) -> Dict[str, Any]:
         """
         PPO 베이스라인 대비 Tier C 에이전트 성능 비교 평가.
 
-        동일한 시나리오 세트에서 Tier C와 기본 PPO 에이전트를 평가하여
-        승률/보상/생존율을 비교한다.
+        MonteCarloEvaluator를 사용하여 Tier C와 기본 PPO 에이전트를
+        동일한 평가 경로(동일 엔진·시나리오 분포·지표 계산)로 평가한다.
+        이전의 내부 경량 루프 대신 표준 MC 평가 프레임워크를 사용하여
+        Tier A (PPO)와의 비교 신뢰도를 보장한다.
         """
-        from ontology.combat_schema import ScenarioFactory, ForceAlignment
+        from evaluation.monte_carlo import MonteCarloEvaluator
         from simulator.lanchester_engine import LanchesterEngine
-        from rl_agent.blue_agent import BlueAgent, build_state_vector
+        from rl_agent.blue_agent import BlueAgent
 
         engine = LanchesterEngine(seed=self.config.seed)
-        ppo_agent = BlueAgent()  # 기본 PPO
+        ppo_agent = BlueAgent()
 
-        results = {"tier_c": [], "ppo": []}
-
-        for run_idx in range(n_runs):
-            run_seed = self.config.seed + run_idx * 100
-            kg = ScenarioFactory.create_standard_scenario(
-                n_blue=8, n_red=6, seed=run_seed,
-            )
-
-            for agent_label, agent in [("tier_c", self), ("ppo", None)]:
-                # Reset scenario
-                kg_copy = ScenarioFactory.create_standard_scenario(
-                    n_blue=8, n_red=6, seed=run_seed,
-                )
-                wins = 0
-                total_r = 0.0
-                initial_hc = sum(
-                    u.headcount for u in kg_copy.units.values()
-                    if u.alignment == ForceAlignment.BLUE
-                )
-
-                for _ in range(self.config.max_steps):
-                    state = build_state_vector(kg_copy)
-                    if agent_label == "tier_c":
-                        action, _, _ = self._select_action(state)
-                    else:
-                        action, _, _ = ppo_agent.select_action(state)
-
-                    step = engine.run_step(kg_copy)
-                    if step.mission_status != "ongoing":
-                        if "blue_win" in step.mission_status:
-                            wins = 1
-                        break
-
-                final_hc = sum(
-                    u.headcount for u in kg_copy.units.values()
-                    if u.alignment == ForceAlignment.BLUE
-                )
-                survival = final_hc / max(initial_hc, 1)
-
-                results[agent_label].append({
-                    "win": wins,
-                    "survival_rate": survival,
-                })
-
-        # 집계
-        comparison = {}
-        for label in ("tier_c", "ppo"):
-            data = results[label]
-            comparison[label] = {
-                "win_rate": float(np.mean([d["win"] for d in data])),
-                "avg_survival": float(np.mean([d["survival_rate"] for d in data])),
-            }
-
-        comparison["delta_win_rate"] = (
-            comparison["tier_c"]["win_rate"] - comparison["ppo"]["win_rate"]
+        mc_eval = MonteCarloEvaluator(
+            n_runs=n_runs,
+            seed=self.config.seed,
+            n_workers=1,
         )
-        comparison["tier_c_algorithm"] = self.config.algorithm
-        comparison["n_runs"] = n_runs
 
+        tier_c_report = mc_eval.evaluate(
+            agent=self,
+            engine=engine,
+            max_steps=self.config.max_steps,
+            verbose=False,
+            show_progress=False,
+        )
+        ppo_report = mc_eval.evaluate(
+            agent=ppo_agent,
+            engine=engine,
+            max_steps=self.config.max_steps,
+            verbose=False,
+            show_progress=False,
+        )
+
+        comparison = {
+            "tier_c": {
+                "win_rate":          tier_c_report.blue_win_rate,
+                "win_rate_ci":       tier_c_report.blue_win_rate_ci,
+                "avg_casualties":    tier_c_report.avg_blue_casualties,
+                "strategy_robustness": tier_c_report.strategy_robustness,
+                "cvar_10":           tier_c_report.cvar_10,
+            },
+            "ppo": {
+                "win_rate":          ppo_report.blue_win_rate,
+                "win_rate_ci":       ppo_report.blue_win_rate_ci,
+                "avg_casualties":    ppo_report.avg_blue_casualties,
+                "strategy_robustness": ppo_report.strategy_robustness,
+                "cvar_10":           ppo_report.cvar_10,
+            },
+            "delta_win_rate":    tier_c_report.blue_win_rate - ppo_report.blue_win_rate,
+            "delta_cvar_10":     tier_c_report.cvar_10 - ppo_report.cvar_10,
+            "tier_c_algorithm":  self.config.algorithm,
+            "n_runs":            n_runs,
+        }
         return comparison
 
     @staticmethod

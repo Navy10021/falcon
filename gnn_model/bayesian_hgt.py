@@ -102,11 +102,27 @@ class BayesianHGT(nn.Module):
         n_layers: int = 3,
         n_heads: int = 4,
         dropout: float = 0.3,
-        mc_samples: int = 20
+        mc_samples: int = 20,
+        adaptive_mc: bool = True,
     ):
         super().__init__()
         self.mc_samples = mc_samples
         self.dropout_rate = dropout
+        self._last_mc_n_runs: int = mc_samples  # 마지막 실행의 실제 forward 횟수 (로깅용)
+
+        # AdaptiveMCDropout — mc_samples를 상한으로, 최소 5회 보장
+        if adaptive_mc:
+            from utils.adaptive_mc import AdaptiveMCDropout, AdaptiveMCConfig
+            self._amc: Optional["AdaptiveMCDropout"] = AdaptiveMCDropout(
+                AdaptiveMCConfig(
+                    n_min=max(5, mc_samples // 4),
+                    n_max=mc_samples,
+                    patience=3,
+                    threshold=0.01,
+                )
+            )
+        else:
+            self._amc = None
 
         # 입력 임베딩
         self.input_proj = nn.Sequential(
@@ -209,22 +225,48 @@ class BayesianHGT(nn.Module):
         self, x: torch.Tensor, adj: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
         """
-        MC Dropout으로 불확실성 정량화
-        훈련 모드로 전환해 Dropout 활성화 후 복원
+        MC Dropout으로 불확실성 정량화.
+
+        AdaptiveMCDropout이 활성화된 경우(adaptive_mc=True):
+          - 불확실성이 수렴하면 조기 중단 (최소 n_min 회 보장)
+          - 실제 실행 횟수는 self._last_mc_n_runs에 기록됨
+        비활성화 시: self.mc_samples 고정 횟수 실행.
         """
         was_training = self.training
         self.train()  # Dropout 활성화
 
-        casualty_means, casualty_logvars = [], []
-        risk_means, risk_logvars = [], []
+        casualty_means: list = []
+        casualty_logvars: list = []
+        risk_means: list = []
+        risk_logvars: list = []
 
-        with torch.no_grad():
-            for _ in range(self.mc_samples):
-                out = self._single_forward(x, adj)
+        if self._amc is not None:
+            # ── AdaptiveMCDropout 경로 ──────────────────────
+            def _forward_fn() -> "np.ndarray":
+                import numpy as _np
+                with torch.no_grad():
+                    out = self._single_forward(x, adj)
                 casualty_means.append(out["casualty_mean"].unsqueeze(0))
                 casualty_logvars.append(out["casualty_logvar"].unsqueeze(0))
                 risk_means.append(out["risk_mean"].unsqueeze(0))
                 risk_logvars.append(out["risk_logvar"].unsqueeze(0))
+                return _np.array(
+                    [out["casualty_mean"].item(), out["risk_mean"].item()],
+                    dtype=_np.float32,
+                )
+
+            self._amc.run(_forward_fn)
+            self._last_mc_n_runs = self._amc.last_n_runs
+        else:
+            # ── 고정 횟수 경로 ─────────────────────────────
+            with torch.no_grad():
+                for _ in range(self.mc_samples):
+                    out = self._single_forward(x, adj)
+                    casualty_means.append(out["casualty_mean"].unsqueeze(0))
+                    casualty_logvars.append(out["casualty_logvar"].unsqueeze(0))
+                    risk_means.append(out["risk_mean"].unsqueeze(0))
+                    risk_logvars.append(out["risk_logvar"].unsqueeze(0))
+            self._last_mc_n_runs = self.mc_samples
 
         self.train(was_training)  # 호출 전 모드로 복원
 
