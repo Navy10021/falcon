@@ -355,4 +355,43 @@ class MultiDomainRunner:
                     summary["generalization_gap"] * 100)
         logger.info("[R11] 리포트 저장: %s", report_path)
 
+        # V7: ExperimentRegistry에 영구 등록
+        self._register_to_registry(report_path, summary)
+
         return report
+
+    def _register_to_registry(self, report_path: str, summary: Dict[str, Any]) -> None:
+        """
+        V7: MultiDomainRunner 결과를 ExperimentRegistry에 영구 등록.
+
+        동일 report_path로 재실행 시 기존 레코드를 덮어쓴다.
+        """
+        try:
+            from utils.experiment_registry import ExperimentRegistry, RunRecord
+            import datetime
+
+            # run_id = 결과 디렉토리 이름 + 타임스탬프
+            dir_name = os.path.basename(os.path.dirname(report_path))
+            run_id = f"multidomain_{dir_name}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            record = RunRecord(
+                run_id=run_id,
+                phase=11,  # R11 다도메인 실험 식별자
+                algorithm="ppo_multidomain",
+                seed=self.config.seeds[0] if self.config.seeds else 0,
+                episodes=self.config.n_episodes_per_seed * len(self.config.seeds),
+                checkpoint_dir=os.path.dirname(report_path),
+                win_rate=summary.get("in_domain_win_rate_avg"),
+                manifest_path=report_path,
+            )
+
+            # registry는 report_path 상위 디렉토리에서 관리
+            registry_dir = os.path.dirname(os.path.dirname(report_path)) or "."
+            registry = ExperimentRegistry(root_dir=registry_dir)
+            registry.scan()
+            registry.add(record)
+            registry.save_index(os.path.join(registry_dir, "experiment_index.json"))
+
+            logger.info("[R11/V7] ExperimentRegistry 등록 완료: %s", run_id)
+        except Exception as exc:
+            logger.warning("[R11/V7] Registry 등록 실패 (무시): %s", exc)

@@ -35,3 +35,16 @@ jobs:
         env:
           PYTHONPATH: .
         run: pytest -q
+
+      - name: Performance Regression Gate
+        env:
+          PYTHONPATH: .
+        run: |
+          python evaluate.py \
+            --fast \
+            --no-progress \
+            --seed 42 \
+            --output-json /tmp/perf_gate.json
+          python scripts/check_perf_gate.py /tmp/perf_gate.json \
+            --min-win-rate 0.45 \
+            --max-cvar10 40.0
