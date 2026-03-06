@@ -7,9 +7,9 @@
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org)
 [![License](https://img.shields.io/badge/License-MIT-22C55E?style=flat-square)](LICENSE)
-[![LOC](https://img.shields.io/badge/코드-26%2C500+_줄-8B5CF6?style=flat-square)](.)
+[![LOC](https://img.shields.io/badge/코드-33%2C000+_줄-8B5CF6?style=flat-square)](.)
 [![UnitTypes](https://img.shields.io/badge/UnitType-42종-F59E0B?style=flat-square)](ontology/combat_schema.py)
-[![Scenarios](https://img.shields.io/badge/시나리오-5종_프리셋-3B82F6?style=flat-square)](ontology/scenario_presets.py)
+[![Scenarios](https://img.shields.io/badge/시나리오-6종_프리셋-3B82F6?style=flat-square)](ontology/scenario_presets.py)
 [![CI](https://img.shields.io/badge/CI-GitHub_Actions-16A34A?style=flat-square)](https://github.com)
 
 *“병력을 늘리지 않는다. 대신 전장의 확률을 재설계한다.”*
@@ -38,7 +38,7 @@
 
 ## 2. 시스템 개요
 
-FALCON은 9개 핵심 기능을 하나의 통합 파이프라인으로 연결합니다:
+FALCON은 10개 핵심 기능을 하나의 통합 파이프라인으로 연결합니다:
 
 1. **다영역 전투 온톨로지** — 42종 유닛, 7개 군종, C2 계층구조, ROE, 정보 온톨로지
 2. **Bayesian GNN** — 이종(heterogeneous) 전투 그래프에서 인식론적·우연적 불확실성 정량화
@@ -49,6 +49,7 @@ FALCON은 9개 핵심 기능을 하나의 통합 파이프라인으로 연결합
 7. **계층적 RL** — 전략 → 전술 → 행동 분해
 8. **역강화학습** — 교범 시연 데이터에서 보상함수 자동 추출
 9. **설명 가능성** — 자동 전후분석(AAR), GNN 어텐션 시각화, 반사실 분석
+10. **실험 유틸리티** — 재현성 관리, 설정 로더, 실험 레지스트리, 다영역 실험 실행기
 
 ---
 
@@ -296,23 +297,56 @@ accel.prune_easy_hard()                                   # 너무 쉽거나 어
 ```bash
 git clone https://github.com/Navy10021/falcon.git
 cd falcon
-python -m venv venv && source venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
-pip install -e .
 ```
 
-### 전체 파이프라인 데모
+### 개발 의존성 (선택 사항)
 
 ```bash
-python demo.py
+pip install -r requirements-dev.txt
 ```
 
-### 훈련 온톨로지 데이터 생성
+> 🔰 **FALCON이 처음이신가요?**
+> 전체 파이프라인의 단계별 안내는 👉 `notebook/FALCON.ipynb`에서 시작하세요.
+> 데이터 생성 → 단계별 훈련 → 평가까지 완전한 엔드-투-엔드 워크플로를 설명과 시각화와 함께 확인할 수 있습니다.
+
+### 루트 데모 (가장 빠른 실행 방법)
 
 ```bash
-python generate_data.py                    # 기본 100개 시나리오
-python generate_data.py --scenarios 500    # 대규모
-python generate_data.py --quick            # 10개 (CI 연기 테스트)
+python demo.py --seed 42
+```
+
+### 패키지 스타일 데모 파이프라인
+
+```bash
+python -m demo.demo --scenario urban_defense --seed 42 --policy rule --out runs/demo_urban
+```
+
+### 빠른 평가
+
+```bash
+python evaluate.py --fast
+python -m demo.evaluate --suite small --mc 20 --seed 42 --out outputs/eval_small
+```
+
+### 전체 워크플로
+
+```bash
+# 1) 훈련 데이터 생성
+python generate_data.py --quick
+
+# 2) 단계별 훈련
+python train.py --phase 1 --config configs/phase1.yaml
+python train.py --phase 2 --config configs/phase2.yaml
+python train.py --phase 3 --hitl --config configs/phase3.yaml
+
+# 3) 평가
+python evaluate.py --monte-carlo 200 --fog-level moderate --output-json runs/eval_report.json
+
+# 4) 선택적 데모 스위트 평가
+python -m demo.evaluate --suite standard --mc 100 --seed 0 --out outputs/eval_standard
 ```
 
 ### 인터랙티브 노트북
@@ -350,7 +384,7 @@ jupyter notebook notebook/FALCON.ipynb
 | **미사일·드론** | ballistic_missile, cruise_missile, anti_ship_missile, sam_battery, rocket_artillery, uav_recon, uav_strike, loitering_munition, ugv, usv |
 | **전략·사이버·우주** | cyber_unit, space_asset, psyops, strategic_missile, electronic_warfare, signal |
 
-#### 5종 시나리오 프리셋
+#### 6종 시나리오 프리셋
 
 ```python
 from ontology.scenario_presets import load_scenario
@@ -360,6 +394,7 @@ kg, c2_mgr = load_scenario("air_superiority")     # Blue  8 vs Red  7 | 200km
 kg, c2_mgr = load_scenario("urban_warfare")       # Blue  7 vs Red  6 |  10km
 kg, c2_mgr = load_scenario("multidomain_contest") # Blue 15 vs Red 10 | 150km, 전 도메인
 kg, c2_mgr = load_scenario("cyber_ew")            # Blue  7 vs Red  6 |  80km, EW 중심
+kg, c2_mgr = load_scenario("amphibious_assault")  # Blue 해병+해군 상륙작전 시나리오
 ```
 
 ---
@@ -484,6 +519,21 @@ python evaluate.py --benchmark historical --benchmark-runs 10
 python evaluate.py --fast --no-progress
 ```
 
+주요 옵션:
+- `--monte-carlo`, `--workers`, `--max-steps`
+- `--fog-level {clear,moderate,maximum}`
+- `--fast` / `--full`
+- `--benchmark historical` + `--benchmark-runs`
+- `--output-json <경로>`
+
+데모 평가 스위트:
+```bash
+python -m demo.evaluate --suite small    --mc 20  --seed 42 --out outputs/eval_small
+python -m demo.evaluate --suite standard --mc 100 --seed 0  --out outputs/eval_standard
+python -m demo.evaluate --suite stress   --mc 500 --seed 0  --out outputs/eval_stress
+```
+출력물: `leaderboard.csv`, `metrics_aggregate.json`
+
 | 지표 | 목표치 |
 |------|--------|
 | 병력 감축률 | **15–25%** |
@@ -495,20 +545,67 @@ python evaluate.py --fast --no-progress
 
 ---
 
+### `utils/` — 실험 유틸리티
+
+| 모듈 | 역할 |
+|------|------|
+| `config_loader.py` | YAML 설정 로딩 및 오버라이드 처리 |
+| `reproducibility.py` | 시드 고정, 결정론적 실행 보장 |
+| `experiment_registry.py` | 실험 메타데이터 등록 및 조회 |
+| `experiment_tracker.py` | 실험 진행 추적 및 아티팩트 저장 |
+| `multidomain_runner.py` | 다영역 도메인 이전 실험 실행기 |
+| `adaptive_mc.py` | 적응형 Monte Carlo 샘플링 |
+| `hp_search.py` | 하이퍼파라미터 자동 탐색 |
+| `security.py` | 입력 검증 및 보안 헬퍼 |
+
+---
+
+### `demo/` — 패키지 스타일 데모 파이프라인
+
+```bash
+# 완전한 파이프라인 실행
+python -m demo.demo --scenario urban_defense --seed 42 --policy rule --out runs/demo_urban
+
+# 데모 평가
+python -m demo.evaluate --suite standard --mc 100 --seed 0 --out outputs/eval_standard
+```
+
+출력 아티팩트:
+- `summary.json` — 실행 요약
+- `metrics.csv` — 수치 지표
+- `fig_episode.png` — 에피소드 시각화
+- `aar.html` — 자동 전후분석 보고서
+
+---
+
 ## 7. 훈련 및 평가
 
 ### 훈련 단계
 
 ```bash
 # Phase 1 — Bayesian GNN + Blue PPO 기준선
-python train.py --phase 1 --episodes 1000
+python train.py --phase 1 --config configs/phase1.yaml
 
 # Phase 2 — 리그 기반 적대적 자기 대전
-python train.py --phase 2 --episodes 5000
+python train.py --phase 2 --config configs/phase2.yaml
 
 # Phase 3 — HITL 통합 루프
-python train.py --phase 3 --episodes 2000 --hitl
+python train.py --phase 3 --hitl --config configs/phase3.yaml
 ```
+
+### 데이터 생성 출력 아티팩트
+
+```bash
+python generate_data.py --quick            # 빠른 테스트용
+python generate_data.py --scenarios 500    # 대규모
+```
+
+출력물:
+- `data/scenarios.json`
+- `data/episodes.json`
+- `data/irl_demos_summary.json`
+- `data/data_stats.json`
+- `data/ontology_stats.html`
 
 ### YAML 설정
 
@@ -519,19 +616,28 @@ configs/
 ├── phase2.yaml               자기 대전 설정
 ├── phase3.yaml               HITL 설정
 ├── evaluation.yaml           평가 설정
+├── simulator.yaml            시뮬레이터 기본 설정
+├── simulator_full.yaml       시뮬레이터 전체 설정
 └── scenarios/                시나리오별 파라미터 오버라이드
     ├── korea_defense.yaml
     ├── air_superiority.yaml
     ├── urban_warfare.yaml
     ├── multidomain_contest.yaml
-    └── cyber_ew.yaml
+    ├── cyber_ew.yaml
+    └── amphibious_assault.yaml
 ```
+
+`train.py`는 `--config` 플래그와 함께 에피소드 수, 학습률, 시드, 알고리즘 모드 등 주요 하이퍼파라미터에 대한 CLI 오버라이드를 지원합니다.
 
 ---
 
 ## 8. 테스트
 
 ```bash
+# 전체 테스트 (권장)
+pytest -q
+
+# 개별 테스트 모듈
 PYTHONPATH=. python tests/test_tier1.py
 PYTHONPATH=. python tests/test_tier2.py
 PYTHONPATH=. python tests/test_tier3.py
@@ -542,7 +648,18 @@ PYTHONPATH=. python tests/test_new_simulators.py
 PYTHONPATH=. python tests/test_numerical_stability.py
 ```
 
-CI는 `main` 및 `claude/**` 브랜치 푸시 시 GitHub Actions를 통해 자동 실행됩니다.
+### 린트 및 포맷
+
+```bash
+ruff check .
+black --check .
+
+# 헬퍼 스크립트
+bash scripts/format.sh
+bash scripts/test.sh
+```
+
+CI는 `main` 및 `claude/**` 브랜치 푸시 시 GitHub Actions를 통해 린트 + 테스트가 자동 실행됩니다.
 
 ---
 
@@ -550,32 +667,52 @@ CI는 `main` 및 `claude/**` 브랜치 푸시 시 GitHub Actions를 통해 자�
 
 ```
 falcon/
-├── ontology/                    다영역 전투 지식 온톨로지 (4,922 LOC)
+├── README.md
+├── README_KOR.md
+├── CONTRIBUTING.md
+├── train.py                     훈련 진입점
+├── evaluate.py                  평가 진입점
+├── demo.py                      루트 데모
+├── generate_data.py             데이터 생성
+├── requirements.txt
+├── requirements-dev.txt
+├── pyproject.toml
+├── setup.py
+├── configs/                     YAML 설정 파일
+│   ├── default.yaml
+│   ├── phase1.yaml · phase2.yaml · phase3.yaml
+│   ├── evaluation.yaml · simulator.yaml · simulator_full.yaml
+│   └── scenarios/
+│       ├── air_superiority.yaml · amphibious_assault.yaml
+│       ├── cyber_ew.yaml · korea_defense.yaml
+│       ├── multidomain_contest.yaml · urban_warfare.yaml
+├── ontology/                    다영역 전투 지식 온톨로지
 │   ├── combat_schema.py             42 UnitType · 7 Branch · Capability(19 필드)
 │   ├── military_units.py            한국군 현실 편제 상수
 │   ├── joint_operations.py          C2 구조 + 합동화력
-│   ├── scenario_presets.py          5개 현실 시나리오 프리셋
+│   ├── scenario_presets.py          6개 현실 시나리오 프리셋
 │   ├── roe_ethics.py                IHL 기반 ROE + 윤리 검증기
 │   ├── intelligence.py              8종 정보 융합 + FogOfWar
 │   ├── multidomain.py               도메인 시너지/억제
 │   ├── doctrine_encoder.py          ADP 9대 원칙 평가
 │   └── temporal_extension.py        시계열 상태 추적
-├── simulator/                   전투 환경 시뮬레이터 (4,937 LOC)
+├── simulator/                   전투 환경 시뮬레이터
 │   ├── mixed_lanchester.py          42종 혼합 란체스터 엔진
 │   ├── combat_dynamics.py           BDA · 탄약 · 보급 · EMS
-│   ├── adversarial_scenario.py      ACCEL + DomainRandomizer      ← 신규 P3
+│   ├── adversarial_scenario.py      ACCEL + DomainRandomizer
 │   ├── fog_of_war.py                부분 관측
 │   ├── maneuver_engine.py           A* · LOS · 기동 판정
 │   ├── naval_engine.py              해상 교전
 │   ├── cyber_effects.py             사이버/EW 효과
 │   ├── missile_model.py             미사일 교전
-│   └── weather_model.py             날씨 효과
-├── gnn_model/                   Bayesian 불확실성 GNN (1,385 LOC)
+│   ├── weather_model.py             날씨 효과
+│   └── resource_manager.py          탄약·연료·정비 수명주기
+├── gnn_model/                   Bayesian 불확실성 GNN
 │   ├── bayesian_hgt.py              MC-Dropout HGT (node_in_dim=128)
 │   ├── temporal_gnn.py              시계열 GNN
 │   ├── uncertainty_utils.py         인식론적/우연적 분리
 │   └── temperature_scaling.py       ECE 보정
-├── rl_agent/                    강화학습 에이전트 (5,633 LOC)
+├── rl_agent/                    강화학습 에이전트
 │   ├── blue_agent.py                PPO Blue (STATE_DIM=128)
 │   ├── red_agent.py                 적군 PPO
 │   ├── self_play_trainer.py         Phase A→D 커리큘럼
@@ -583,12 +720,12 @@ falcon/
 │   ├── hierarchical_rl.py           전략→전술→행동 HRL
 │   ├── inverse_rl.py                Max-Entropy IRL
 │   ├── league_selfplay.py           리그 + PFSP + ELO
-│   ├── psro_oracle.py               PSRO + α-Rank               ← 신규 P1
-│   ├── nfsp_agent.py                NFSP BR+AS 이중 네트워크    ← 신규 P1
-│   ├── nfsp_buffer.py               Reservoir + Circular 버퍼   ← 신규 P1
-│   ├── mat_policy.py                Multi-Agent Transformer     ← 신규 P2
-│   └── rarl.py                      RARL + SA-PPO              ← 신규 P3
-├── hitl/                        Human-in-the-Loop (2,270 LOC)
+│   ├── psro_oracle.py               PSRO + α-Rank
+│   ├── nfsp_agent.py                NFSP BR+AS 이중 네트워크
+│   ├── nfsp_buffer.py               Reservoir + Circular 버퍼
+│   ├── mat_policy.py                Multi-Agent Transformer
+│   └── rarl.py                      RARL + SA-PPO
+├── hitl/                        Human-in-the-Loop
 │   ├── natural_language_interface.py   자연어 → 구조화 제약
 │   ├── pareto_generator.py              다목적 Pareto
 │   ├── constraint_parser.py             Hard/Soft/Ethical 파서
@@ -597,28 +734,37 @@ falcon/
 │   ├── bandit_preference.py             Bandit 선호도
 │   ├── preference_reward_adapter.py     선호도 → 보상
 │   └── realtime_replanner.py            실시간 재수립
-├── explainability/              설명 가능성 (920 LOC)
+├── explainability/              설명 가능성
 │   ├── auto_aar.py                  자동 전후분석(AAR)
 │   ├── attention_viz.py             GNN 어텐션 시각화
 │   └── counterfactual.py            반사실 분석
-├── evaluation/                  성능 평가 (1,259 LOC)
-│   ├── monte_carlo.py               5,000회 강건성
-│   ├── historical_benchmark.py      5개 시나리오 벤치마크
+├── evaluation/                  성능 평가
+│   ├── monte_carlo.py               강건성 평가
+│   ├── historical_benchmark.py      시나리오 벤치마크
 │   ├── adversarial_benchmark.py     적대적 강건성
 │   └── metrics.py                   통합 지표
-├── visualization/               Plotly 실시간 전투 대시보드 (799 LOC)
-├── tests/                       테스트 스위트 — 9개 모듈 (1,939 LOC)
-├── configs/                     YAML 설정 파일
-├── docs/reports/                기술 분석 보고서
+├── utils/                       실험 유틸리티
+│   ├── config_loader.py             YAML 설정 로더
+│   ├── reproducibility.py           시드·재현성 관리
+│   ├── experiment_registry.py       실험 레지스트리
+│   ├── experiment_tracker.py        실험 추적기
+│   ├── multidomain_runner.py        다영역 실험 실행기
+│   ├── adaptive_mc.py               적응형 Monte Carlo
+│   ├── hp_search.py                 하이퍼파라미터 탐색
+│   └── security.py                  보안 헬퍼
+├── demo/                        패키지 스타일 데모 파이프라인
+│   ├── demo.py                      완전한 파이프라인 데모
+│   ├── evaluate.py                  데모 평가 스위트
+│   ├── report.py                    결과 보고서 생성
+│   └── DEMO_README.md               데모 전용 가이드
+├── visualization/               Plotly 실시간 전투 대시보드
+├── tests/                       테스트 스위트
+├── docs/                        기술 문서 및 보고서
 ├── data/                        생성 훈련 데이터
-├── checkpoints/                 훈련 체크포인트 & 로그
 ├── notebook/FALCON.ipynb        인터랙티브 주피터 노트북
-├── train.py                     훈련 진입점 (806 LOC)
-├── evaluate.py                  평가 진입점 (116 LOC)
-├── demo.py                      엔드-투-엔드 데모 (374 LOC)
-└── generate_data.py             데이터 생성 (925 LOC)
+└── .github/workflows/ci.yml    CI 워크플로
 
-총계: ~26,500 줄의 Python 코드
+총계: ~33,000+ 줄의 Python 코드
 ```
 
 ---
@@ -706,9 +852,9 @@ Phase 5 (단기 계획) ──────── 예정
 
 **FALCON v4.0** — 다영역 전투 AI 연구 프레임워크
 
-*42종 UnitType · 128D 상태벡터 · 8종 ISR 융합 · PSRO + NFSP + MAT + RARL + ACCEL · IHL 준수 ROE · 5종 시나리오 프리셋*
+*42종 UnitType · 128D 상태벡터 · 8종 ISR 융합 · PSRO + NFSP + MAT + RARL + ACCEL · IHL 준수 ROE · 6종 시나리오 프리셋*
 
-[![Python LOC](https://img.shields.io/badge/Python-26%2C500+_줄-8B5CF6?style=flat-square)](.)
+[![Python LOC](https://img.shields.io/badge/Python-33%2C000+_줄-8B5CF6?style=flat-square)](.)
 [![Ontology](https://img.shields.io/badge/온톨로지-9_모듈-F59E0B?style=flat-square)](ontology/)
 [![Adversarial RL](https://img.shields.io/badge/적대적_RL-P1%2FP2%2FP3-EF4444?style=flat-square)](rl_agent/)
 
