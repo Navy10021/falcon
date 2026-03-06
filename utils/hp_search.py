@@ -183,7 +183,7 @@ class CVaRAwareHPSearch:
             # 에이전트/엔진 생성
             ppo_config = PPOConfig(
                 lr=params.get("lr", 3e-4),
-                clip_range=params.get("clip_range", 0.2),
+                clip_eps=params.get("clip_range", params.get("clip_eps", 0.2)),
                 entropy_coef=params.get("entropy_coef", 0.01),
             )
             agent = BlueAgent(config=ppo_config)
