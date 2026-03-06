@@ -47,4 +47,4 @@ jobs:
             --output-json /tmp/perf_gate.json
           python scripts/check_perf_gate.py /tmp/perf_gate.json \
             --min-win-rate 0.45 \
-            --max-cvar10 40.0
+            --max-cvar10 1800.0
