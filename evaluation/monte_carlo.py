@@ -79,9 +79,6 @@ def _mc_run_worker(args: Dict) -> "MCResult":
     args : dict
         run_id, base_seed, max_steps, fog_level_name, checkpoint_path
     """
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
     from ontology.combat_schema import ScenarioFactory, ForceAlignment
     from simulator.lanchester_engine import LanchesterEngine
     from rl_agent.blue_agent import BlueAgent, build_state_vector
