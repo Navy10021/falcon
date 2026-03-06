@@ -294,6 +294,8 @@ class PPOConfig:
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_eps: float = 0.2
+    # 하위 호환성: 일부 경로(hp_search/구버전 설정)에서 clip_range를 전달함
+    clip_range: Optional[float] = None
     entropy_coef: float = 0.01
     value_coef: float = 0.5
     max_grad_norm: float = 0.5
@@ -301,6 +303,13 @@ class PPOConfig:
     batch_size: int = 64
     rollout_steps: int = 256
     uncertainty_penalty_coef: float = 0.1   # 불확실성 패널티 가중치
+
+    def __post_init__(self):
+        # clip_range가 주어지면 clip_eps와 동기화
+        if self.clip_range is not None:
+            self.clip_eps = float(self.clip_range)
+        else:
+            self.clip_range = float(self.clip_eps)
 
 
 @dataclass
