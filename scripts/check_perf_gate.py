@@ -38,16 +38,25 @@ def _load_report(path: str) -> dict:
 
 def _extract_metrics(report: dict) -> dict:
     """MCEvaluationReport JSON에서 핵심 지표 추출"""
-    # evaluate.py → evaluator.save_report_json() 결과 구조에 맞춤
+    # evaluate.py → evaluator.save_report_json() (v1 schema)는 metrics 중첩 구조를 사용.
+    # 하위 호환을 위해 legacy 평면 구조도 함께 지원한다.
+    metrics_src = report.get("metrics", report)
     metrics = {
-        "blue_win_rate": report.get("blue_win_rate", report.get("win_rate", None)),
-        "cvar_10":       report.get("cvar_10", None),
-        "cvar_05":       report.get("cvar_05", None),
-        "avg_casualties":report.get("avg_blue_casualties", None),
-        "robustness":    report.get("strategy_robustness", None),
-        "n_runs":        report.get("n_runs", 0),
+        "blue_win_rate": metrics_src.get("blue_win_rate", metrics_src.get("win_rate", None)),
+        "cvar_10":       metrics_src.get("cvar_10", None),
+        "cvar_05":       metrics_src.get("cvar_05", None),
+        "avg_casualties":metrics_src.get("avg_blue_casualties", None),
+        "robustness":    metrics_src.get("strategy_robustness", None),
+        "n_runs":        metrics_src.get("n_runs", 0),
     }
     return metrics
+
+
+def _fmt_metric(value, spec: str) -> str:
+    """None 안전 포맷팅"""
+    if value is None:
+        return "N/A"
+    return format(value, spec)
 
 
 def run_gate(
@@ -71,8 +80,14 @@ def run_gate(
         print("\n── FALCON 성능 회귀 게이트 ────────────────────")
         print(f"  리포트 파일  : {report_path}")
         print(f"  MC runs     : {metrics['n_runs']}")
-        print(f"  Blue 승률   : {metrics['blue_win_rate']:.4f}  (임계값 ≥ {min_win_rate})")
-        print(f"  CVaR@10     : {metrics['cvar_10']}  (임계값 ≤ {max_cvar10})")
+        print(
+            f"  Blue 승률   : {_fmt_metric(metrics['blue_win_rate'], '.4f')}"
+            f"  (임계값 ≥ {min_win_rate})"
+        )
+        print(
+            f"  CVaR@10     : {_fmt_metric(metrics['cvar_10'], '.2f')}"
+            f"  (임계값 ≤ {max_cvar10})"
+        )
         print()
 
     failures: list[str] = []
