@@ -336,12 +336,18 @@ class HITLSession:
 # Web App Factory
 # ──────────────────────────────────────────────
 
-def create_falcon_app():
+def create_falcon_app(bridge=None):
     """
     FALCON HITL 웹 앱 생성.
 
     Flask 기반 REST API + 간단한 HTML 대시보드.
     Flask가 없으면 None 반환.
+
+    Parameters
+    ----------
+    bridge : HITLSessionBridge, optional
+        V8: Phase 3 학습 루프와의 실시간 연동 브리지.
+        None이면 독립 실행 모드 (브리지 없이 동작).
     """
     try:
         from flask import Flask, jsonify, request, render_template_string
@@ -391,8 +397,23 @@ def create_falcon_app():
         session_id = data.get("session_id", "default")
         strategy_id = data.get("strategy_id", "")
         feedback = data.get("feedback", "")
+        feedback_rating = int(data.get("feedback_rating", 5))
         session = get_or_create_session(session_id)
         result = session.select_strategy(strategy_id, feedback)
+
+        # V8: 브리지가 연결된 경우 Phase 3 루프에 선택 이벤트 전달
+        if bridge is not None:
+            ep_idx = data.get("episode_idx", bridge._current_episode)
+            opt_index = data.get("option_index", 0)
+            bridge.put_selection(
+                episode_idx=ep_idx,
+                strategy_id=strategy_id,
+                option_index=opt_index,
+                feedback_rating=feedback_rating,
+                feedback_text=feedback,
+            )
+            result["bridge_notified"] = True
+
         return jsonify(result)
 
     @app.route("/api/constraints/update", methods=["POST"])
@@ -411,6 +432,29 @@ def create_falcon_app():
         session_id = request.args.get("session_id", "default")
         session = get_or_create_session(session_id)
         return jsonify({"pareto": session.get_pareto_data()})
+
+    # ── V8: 브리지 전용 엔드포인트 ──────────────────────────────
+
+    @app.route("/api/bridge/status")
+    def bridge_status():
+        """V8: Phase 3 학습 루프와의 브리지 상태 조회"""
+        if bridge is None:
+            return jsonify({"bridge": None, "mode": "standalone"})
+        return jsonify({"bridge": bridge.status(), "mode": "live"})
+
+    @app.route("/api/bridge/options")
+    def bridge_options():
+        """V8: Phase 3에서 전달된 최신 Pareto 후보 조회 (폴링용)"""
+        if bridge is None:
+            return jsonify({"options": None, "episode_idx": -1})
+        event = bridge.get_options_nowait()
+        if event is None:
+            return jsonify({"options": None, "episode_idx": bridge._current_episode})
+        return jsonify({
+            "episode_idx": event.episode_idx,
+            "options": [_pareto_opt_to_web(o, i).to_dict()
+                        for i, o in enumerate(event.ranked_options)],
+        })
 
     return app
 

@@ -60,8 +60,18 @@ def build_state_vector(
     + Blue 군종 구성 (7D) + Red 군종 구성 (7D)
     + Blue 도메인 구성 (7D) + Red 도메인 구성 (7D)
     + 지형 정보 (6D) + C2·합동화력 (4D)
-    = 56D 기본  +  GNN 불확실성 (8D) + 시계열 트렌드 (8D)
-    = 72D → 128D 패딩
+    = 56D 기본
+    + 해상·사이버 도메인 (6D)           ← V9: naval/cyber 확장
+    +  GNN 불확실성 (8D) + 시계열 트렌드 (8D)
+    = 78D → 128D 패딩
+
+    해상·사이버 6D (V9):
+      naval_blue_fraction   : Blue 해상 유닛 생존 비율
+      naval_red_fraction    : Red 해상 유닛 생존 비율 (위협 지표)
+      salvo_intensity       : 해상 화력 교환 강도 (전체 해상 전투력 정규화)
+      cyber_degradation     : Blue 사이버 전력 저하도 (손실 비율)
+      ew_suppression        : Red EW 유닛 능동 비율 (Blue 억제 수준)
+      naval_threat_level    : Red 해상 전투력 / Blue 해상 전투력 비율
 
     intel_manager 제공 시:
       - gnn_extension 자동 계산 (정보 온톨로지 8D 특성)
@@ -187,6 +197,57 @@ def build_state_vector(
         c2_state,       # 4
     ])  # = 56D
 
+    # ── V9: 6D 해상·사이버 도메인 확장 ──────────────────────
+    _naval_domains = {"sea", "subsurface"}
+    _blue_naval = [u for u in blue_units
+                   if hasattr(u, "domain") and u.domain.value in _naval_domains]
+    _red_naval  = [u for u in red_units
+                   if hasattr(u, "domain") and u.domain.value in _naval_domains]
+    _blue_cyber = [u for u in blue_units
+                   if hasattr(u, "domain") and u.domain.value == "cyber"]
+    _red_ew     = [u for u in red_units
+                   if hasattr(u, "domain") and u.domain.value in ("cyber", "electronic_warfare")]
+
+    # naval_blue_fraction: Blue 해상 유닛 생존 비율
+    _nb_total  = max(len(_blue_naval), 1)
+    _nb_active = sum(1 for u in _blue_naval if u.status != UnitStatus.DESTROYED)
+    naval_blue_frac = _nb_active / _nb_total
+
+    # naval_red_fraction: Red 해상 유닛 생존 비율 (위협 지표)
+    _nr_total  = max(len(_red_naval), 1)
+    _nr_active = sum(1 for u in _red_naval if u.status != UnitStatus.DESTROYED)
+    naval_red_frac = _nr_active / _nr_total if _red_naval else 0.0
+
+    # salvo_intensity: 해상 화력 교환 강도 (전체 해상 전투력 정규화)
+    _blue_naval_cp = sum(u.combat_power for u in _blue_naval)
+    _red_naval_cp  = sum(u.combat_power for u in _red_naval)
+    salvo_intensity = float(np.clip(
+        (_blue_naval_cp + _red_naval_cp) / max(blue_cp + red_cp, 1e-6), 0.0, 1.0
+    ))
+
+    # cyber_degradation: Blue 사이버 전력 저하도 (파괴/손실 비율)
+    _bc_total = max(len(_blue_cyber), 1)
+    _bc_lost  = sum(1 for u in _blue_cyber if u.status == UnitStatus.DESTROYED)
+    cyber_degradation = _bc_lost / _bc_total if _blue_cyber else 0.0
+
+    # ew_suppression: Red EW 유닛 능동 비율 (Blue에 대한 전자전 억제)
+    _rew_active = sum(1 for u in _red_ew if u.status != UnitStatus.DESTROYED)
+    ew_suppression = _rew_active / max(n_red, 1)
+
+    # naval_threat_level: Red 해상 전투력 / Blue 해상 전투력
+    naval_threat_level = float(np.clip(
+        _red_naval_cp / max(_blue_naval_cp, 1e-6), 0.0, 5.0
+    ) / 5.0)  # 0~1로 정규화
+
+    naval_cyber_state = np.array([
+        naval_blue_frac,
+        naval_red_frac,
+        salvo_intensity,
+        cyber_degradation,
+        ew_suppression,
+        naval_threat_level,
+    ], dtype=np.float32)  # 6D
+
     # GNN 불확실성 확장 (8D)
     if gnn_extension is None:
         gnn_extension = np.zeros(8, dtype=np.float32)
@@ -201,8 +262,8 @@ def build_state_vector(
     n_temp = min(len(temporal_features), 8)
     temp_feat[:n_temp] = temporal_features[:n_temp]
 
-    # 72D → 128D 패딩
-    combined = np.concatenate([base_state, gnn_ext, temp_feat])   # 72D
+    # 78D → 128D 패딩
+    combined = np.concatenate([base_state, naval_cyber_state, gnn_ext, temp_feat])  # 78D
     result = np.zeros(STATE_DIM, dtype=np.float32)
     result[:len(combined)] = combined[:STATE_DIM]
     result = np.nan_to_num(result, nan=0.0, posinf=10.0, neginf=-10.0)

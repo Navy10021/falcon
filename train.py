@@ -535,6 +535,20 @@ def train_phase3(args):
     from rl_agent.blue_agent import BlueActionSpace as _BA3
     cf_loop_p3 = _setup_cf_loop(args, n_actions=_BA3.N_ACTIONS)
 
+    # V8: HITL 웹 인터페이스 실시간 연동 브리지
+    _bridge = None
+    if getattr(args, "hitl_web", False):
+        from hitl.session_bridge import HITLSessionBridge
+        _bridge = HITLSessionBridge(auto_timeout=60.0)
+        _bridge_started = _bridge.start_web_server(
+            port=getattr(args, "hitl_port", 8050)
+        )
+        if _bridge_started:
+            logger.info("[Phase 3/V8] HITL 웹 서버 기동 완료 — 브라우저에서 전략 선택 가능")
+        else:
+            logger.warning("[Phase 3/V8] 웹 서버 기동 실패 — 시뮬레이션 모드로 계속 진행")
+            _bridge = None
+
     phase3_stats = {"episodes": args.episodes, "all_violated_episodes": 0}
 
     for ep in range(args.episodes):
@@ -569,14 +583,28 @@ def train_phase3(args):
         ranked_options = learner.get_personalized_ranking(mc_options)
 
         ai_recommended = ranked_options[0]
-        # 모의 HITL 채택: 기본 70%는 AI 추천 수용, 30%는 차선책 선택
-        accept_prob = 0.70
-        if len(ranked_options) > 1 and np.random.rand() > accept_prob:
-            selected = ranked_options[1]
-            feedback_rating = 3
+
+        # V8: 웹 브리지 연결 시 실제 지휘관 선택 대기, 없으면 시뮬레이션 모드
+        if _bridge is not None:
+            _bridge.put_options(ep, mc_options, ranked_options, constraints)
+            _sel_event = _bridge.get_selection()  # blocks up to auto_timeout
+            if _sel_event is not None:
+                _opt_idx = min(_sel_event.option_index, len(ranked_options) - 1)
+                selected = ranked_options[_opt_idx]
+                feedback_rating = _sel_event.feedback_rating
+            else:
+                # 타임아웃 → AI 추천 자동 사용
+                selected = ai_recommended
+                feedback_rating = 5
         else:
-            selected = ai_recommended
-            feedback_rating = 5
+            # 모의 HITL 채택: 기본 70%는 AI 추천 수용, 30%는 차선책 선택
+            accept_prob = 0.70
+            if len(ranked_options) > 1 and np.random.rand() > accept_prob:
+                selected = ranked_options[1]
+                feedback_rating = 3
+            else:
+                selected = ai_recommended
+                feedback_rating = 5
 
         learner.record_selection(
             SelectionRecord(
@@ -1098,6 +1126,10 @@ def main():
     parser.add_argument("--save-interval", type=int, default=None, help="저장 간격")
     parser.add_argument("--checkpoint-dir", type=str, default=None, help="체크포인트 저장 경로")
     parser.add_argument("--hitl", action="store_true", help="Phase 3 HITL 통합 루프 활성화")
+    parser.add_argument("--hitl-web", action="store_true",
+                        help="V8: Phase 3에서 HITL 웹 인터페이스 실시간 연동 활성화")
+    parser.add_argument("--hitl-port", type=int, default=8050,
+                        help="V8: HITL 웹 서버 포트 (기본: 8050)")
     parser.add_argument("--algorithm", type=str, default="ppo",
                         choices=["ppo", "mappo", "rarl", "nfsp"],
                         help="알고리즘 선택 (ppo|mappo|rarl|nfsp)")
