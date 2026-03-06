@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org)
 [![License](https://img.shields.io/badge/License-MIT-22C55E?style=flat-square)](LICENSE)
-[![LOC](https://img.shields.io/badge/LOC-26%2C500+-8B5CF6?style=flat-square)](.)
+[![LOC](https://img.shields.io/badge/LOC-33%2C000+-8B5CF6?style=flat-square)](.)
 [![UnitTypes](https://img.shields.io/badge/UnitType-42-F59E0B?style=flat-square)](ontology/combat_schema.py)
 [![CI](https://img.shields.io/badge/CI-GitHub_Actions-16A34A?style=flat-square)](https://github.com)
 
@@ -23,10 +23,11 @@
 FALCON is an end-to-end experimentation repository for military-domain AI research workflows:
 
 - **Knowledge modeling:** ontology-backed scenario and doctrine representation (`ontology/`).
-- **Environment dynamics:** combat engines with fog-of-war, maneuver, and resource constraints (`simulator/`).
+- **Environment dynamics:** combat engines with fog-of-war, maneuver, missile, naval, and resource constraints (`simulator/`).
 - **Learning stack:** Bayesian/temporal GNN components and multiple RL paradigms (`gnn_model/`, `rl_agent/`).
-- **Decision governance:** ROE, constraints, preference modeling, and HITL intervention (`hitl/`, `ontology/roe_ethics.py`).
-- **Evaluation and reporting:** Monte Carlo, benchmark hooks, metrics, demo artifacts, and test coverage (`evaluation/`, `demo/`, `tests/`).
+- **Decision governance:** ROE, constraints, preference modeling, and HITL intervention with NL interface (`hitl/`, `ontology/roe_ethics.py`).
+- **Evaluation and reporting:** Monte Carlo, adversarial/fog/historical benchmarks, metrics, demo artifacts, and test coverage (`evaluation/`, `demo/`, `tests/`).
+- **Experiment utilities:** reproducibility, config loading, run registry, multidomain runner, and security helpers (`utils/`).
 
 This repository is structured for **research-to-prototype iteration** rather than a single model benchmark.
 
@@ -35,10 +36,11 @@ This repository is structured for **research-to-prototype iteration** rather tha
 | Area | What is present in this repository |
 |---|---|
 | Core scripts | `train.py`, `evaluate.py`, `demo.py`, `generate_data.py` |
-| Configuration | Phase/evaluation/scenario YAMLs under `configs/` |
-| Models/agents | Bayesian GNN, PPO variants, MAPPO/MAT/NFSP/PSRO modules |
-| Human oversight | Constraint parsing, preference learning, Pareto/reranking modules |
-| Evaluation outputs | JSON/CSV summaries, plots, AAR HTML (demo path) |
+| Configuration | Phase/evaluation/simulator/scenario YAMLs under `configs/` |
+| Models/agents | Bayesian GNN, PPO variants, MAPPO/MAT/NFSP/PSRO/hierarchical RL/IRL modules |
+| Human oversight | Constraint parsing, preference learning, NL interface, Pareto/reranking modules |
+| Evaluation outputs | JSON/CSV summaries, plots, AAR HTML (demo path), adversarial/fog/historical benchmarks |
+| Utilities | Experiment registry, multidomain runner, reproducibility, security helpers (`utils/`) |
 | Reproducibility | Seeded CLI flows, pytest suite, GitHub Actions CI |
 
 ## 🎯 Why this repository matters
@@ -61,29 +63,37 @@ flowchart LR
   R --> E[evaluation/]
   H --> E
   E --> X[explainability/ + visualization/ + demo/]
+  U[utils/] --> R
+  U --> E
 ```
 
 ### Module responsibilities
 
-- **`ontology/`**: combat schema, doctrine encoding, multidomain links, scenario presets/loaders, ROE/ethics.
-- **`simulator/`**: Lanchester and mixed combat engines, maneuver/fog/weather/cyber/resource effects.
-- **`gnn_model/`**: Bayesian HGT, temporal GNN, uncertainty decomposition and calibration.
-- **`rl_agent/`**: blue/red agents, self-play, RARL, MAPPO, MAT, NFSP, PSRO, league training utilities.
-- **`hitl/`**: constraints, preference learning/adaptation, Pareto candidate generation, replanning.
-- **`evaluation/`**: Monte Carlo evaluation, benchmark adapters, metric helpers.
+- **`ontology/`**: combat schema, doctrine encoding, intelligence modeling, joint operations, military units, multidomain links, temporal extensions, scenario presets/loaders, ROE/ethics.
+- **`simulator/`**: Lanchester and mixed combat engines, maneuver/fog/weather/cyber/resource effects, missile modeling, naval engine, adversarial scenario composer.
+- **`gnn_model/`**: Bayesian HGT, temporal GNN, uncertainty decomposition, calibration, and temperature scaling.
+- **`rl_agent/`**: blue/red agents, self-play, RARL, MAPPO, MAT, NFSP, PSRO, hierarchical RL, inverse RL, league training, tier-C trainer.
+- **`hitl/`**: constraint parser, preference learning/adaptation, bandit preference, MC-Pareto validator, Pareto candidate generation, replanning, natural-language interface, web interface.
+- **`evaluation/`**: Monte Carlo evaluation, adversarial benchmark, fog A/B protocol, historical benchmark, metric helpers.
 - **`explainability/` + `visualization/`**: AAR/counterfactual/attention and runtime dashboard support.
+- **`utils/`**: config loader, reproducibility utilities, experiment registry, experiment tracker, multidomain runner, security helpers.
 - **`demo/`**: compact runnable pipeline and lightweight evaluation/reporting path.
 
 ## 🧠 Key capabilities
 
 ### Implemented (verified from code layout and scripts)
 
-- Ontology-based scenario creation and schema abstractions.
-- Multi-engine simulation with fog-of-war and dynamics extensions.
+- Ontology-based scenario creation with schema abstractions, intelligence modeling, joint operations, and temporal extensions.
+- Multi-engine simulation: Lanchester, mixed Lanchester, maneuver, naval, missile, fog-of-war, weather, cyber effects, and resource management.
+- Six built-in scenario presets: air superiority, amphibious assault, cyber/EW, Korea defense, multidomain contest, urban warfare.
 - Phase-oriented training entrypoint (`--phase` in `train.py`) with optional algorithm comparison in phase 2.
-- Two evaluation surfaces:
+- Rich RL algorithm suite: MAPPO, MAT, NFSP, PSRO, RARL, hierarchical RL, inverse RL, league self-play, tier-C trainer.
+- HITL with natural-language constraint interface, bandit preference, MC-Pareto validation, and real-time replanning.
+- Three evaluation surfaces:
   - root-level evaluator (`evaluate.py`),
-  - demo evaluation suites (`python -m demo.evaluate`).
+  - demo evaluation suites (`python -m demo.evaluate`),
+  - adversarial, fog A/B, and historical benchmark protocols (`evaluation/`).
+- Experiment tracking via registry, multidomain domain-transfer runner, and reproducibility utilities (`utils/`).
 - Data generation pipeline producing scenario/episode/IRL summary datasets.
 - Artifact-producing demo flow (`summary.json`, `metrics.csv`, `fig_episode.png`, `aar.html`).
 - Automated tests and CI lint/test workflow.
@@ -113,7 +123,15 @@ falcon/
 │   ├── phase2.yaml
 │   ├── phase3.yaml
 │   ├── evaluation.yaml
-│   └── scenarios/*.yaml
+│   ├── simulator.yaml
+│   ├── simulator_full.yaml
+│   └── scenarios/
+│       ├── air_superiority.yaml
+│       ├── amphibious_assault.yaml
+│       ├── cyber_ew.yaml
+│       ├── korea_defense.yaml
+│       ├── multidomain_contest.yaml
+│       └── urban_warfare.yaml
 ├── ontology/
 ├── simulator/
 ├── gnn_model/
@@ -122,7 +140,10 @@ falcon/
 ├── evaluation/
 ├── explainability/
 ├── visualization/
+├── utils/
 ├── demo/
+├── notebook/
+│   └── FALCON.ipynb
 ├── tests/
 ├── docs/
 └── .github/workflows/ci.yml
@@ -236,8 +257,8 @@ Key options include:
 ## 🔬 Explainability / HITL / ontology components
 
 - **Explainability (`explainability/`)**: attention visualization, counterfactual tools, AAR helpers.
-- **HITL (`hitl/`)**: constraint parser, preference learner/adapters, Pareto generators, replanning tools.
-- **Ontology (`ontology/`)**: combat schema, doctrine and multidomain structures, scenario presets/loaders, ROE/ethics validators.
+- **HITL (`hitl/`)**: constraint parser, bandit preference, preference learner/adapters, MC-Pareto validator, Pareto generators, real-time replanning, natural-language interface, web interface.
+- **Ontology (`ontology/`)**: combat schema, doctrine encoder, intelligence, joint operations, military units, multidomain structures, temporal extensions, scenario presets/loaders, ROE/ethics validators.
 
 These modules support policy outputs that can be constrained, interpreted, and reviewed rather than used as opaque model scores.
 
