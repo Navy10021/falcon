@@ -25,7 +25,7 @@ def separator(title: str = "", char: str = "═", width: int = 65):
 
 def run_demo(args):
     print("\n")
-    separator("🧠 AI Combat Optimization System v2.0 — DEMO")
+    separator("🧠 AI Combat Optimization System v4.0 — DEMO")
     print("\n  Ontology-Driven GNN + RL for Force Minimization")
     print("  학술 연구용 가상 전투 데이터 기반\n")
     separator()
