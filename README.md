@@ -13,7 +13,7 @@
 [![CI](https://img.shields.io/badge/CI-GitHub_Actions-16A34A?style=flat-square)](https://github.com)
 
 #### Core Values : *“We do not increase the number of troops. Instead, we redesign the probabilities of the battlefield.”*
-
+#### 국방부 주관 "2026 제1회 국방 AI 아이디어톤" AI 모델 개발 부문 우수 수상작 선정
 </div>
 
 ---
